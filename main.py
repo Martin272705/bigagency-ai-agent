@@ -26,6 +26,16 @@ def strip_html(t):
     t=re.sub(r'<[^>]+>','',t)
     return '\n'.join(l.strip() for l in t.split('\n') if l.strip())
 
+def extract_email_from_body(body_text):
+    """Vyhlada emailovu adresu v tele spravy - pouziva sa ked pride cez webovy formular."""
+    emails = re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', body_text)
+    # Ignoruj systemove adresy
+    ignore = ['noreply', 'no-reply', 'bigagency.sk', 'microsoft', 'outlook']
+    for email in emails:
+        if not any(ig in email.lower() for ig in ignore):
+            return email
+    return ""
+
 def get_ms_token():
     return requests.post(f"https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/token",
         data={"grant_type":"client_credentials","client_id":MS_CLIENT_ID,
@@ -49,17 +59,37 @@ def mark_email_as_read(eid):
     requests.patch(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/messages/{eid}",
         headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json={"isRead":True})
 
-def get_sender_email(email):
-    """Ziska email odosielatela VZDY z From/ReplyTo pola - nie z tela spravy."""
-    for field in [email.get("from",{}), email.get("sender",{})]:
-        addr=field.get("emailAddress",{}).get("address","")
-        name=field.get("emailAddress",{}).get("name","")
-        if addr and "noreply" not in addr.lower(): return addr,name
-    for r in email.get("replyTo",[]):
-        addr=r.get("emailAddress",{}).get("address","")
-        name=r.get("emailAddress",{}).get("name","")
-        if addr and "noreply" not in addr.lower(): return addr,name
-    return "",""
+def get_client_contact(email, clean_body):
+    """
+    Ziska kontakt klienta - 2 moznosti:
+    1. Priamy email na info@ -> email z From pola
+    2. Webovy formular (noreply@) -> email z tela spravy
+    """
+    from_field = email.get("from", {})
+    from_addr = from_field.get("emailAddress", {}).get("address", "")
+    from_name = from_field.get("emailAddress", {}).get("name", "")
+
+    # Moznost 1: Priamy email - From nie je noreply
+    if from_addr and "noreply" not in from_addr.lower():
+        logger.info(f"Kontakt z From pola: {from_addr}")
+        return from_addr, from_name
+
+    # Moznost 2: Webovy formular - hladame email v tele spravy
+    logger.info("Email od noreply - hladam kontakt v tele spravy (webovy formular)")
+    body_email = extract_email_from_body(clean_body)
+    if body_email:
+        logger.info(f"Kontakt z tela spravy: {body_email}")
+        return body_email, ""
+
+    # Fallback - replyTo pole
+    for r in email.get("replyTo", []):
+        addr = r.get("emailAddress", {}).get("address", "")
+        name = r.get("emailAddress", {}).get("name", "")
+        if addr and "noreply" not in addr.lower():
+            return addr, name
+
+    logger.warning("Kontakt klienta sa nepodarilo zistit!")
+    return "", ""
 
 def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY}).json()
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
@@ -91,7 +121,7 @@ def analyze_email_with_claude(subject,body,sender_email,sender_name):
 Odosielatel: {sender_name} <{sender_email}>
 Predmet: {subject}
 Obsah: {body}
-Realny dopyt = popis eventu, po SK/CZ/EN.
+Realny dopyt = popis eventu po SK/CZ/EN.
 IGNORUJ: rustinu/ukrajinskunu, newslettery, Profesia.sk, bankove vypisy, brigady.
 JSON bez backticks: {{"is_real_request":true/false,"client_name":"meno","event_description":"popis","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
     r=anthropic.messages.create(model="claude-sonnet-4-5-20250929",max_tokens=1024,messages=[{"role":"user","content":p}])
@@ -102,16 +132,17 @@ def generate_task_description(analysis,body,sender_email,sender_name):
     today=datetime.now().strftime("%d.%m.%Y")
     aname=analysis.get("assignee_name","")
     cname=analysis.get("client_name",sender_name or "N/A")
+    email_line=sender_email if sender_email else "NEPODARILO SA ZISTIT - pozri webovy formular"
     return f"""## Kontakt na klienta
-\u{1f464} **Meno:** {cname}
-\u{2709}\ufe0f **Email:** {sender_email}
+**Meno:** {cname}
+**Email:** {email_line}
 
 ---
 
 ## Popis dopytu
 {analysis.get('event_description','N/A')}
 
-\U0001f4c5 **Termin:** {analysis.get('event_date') or 'neuvedeny'}
+**Termin:** {analysis.get('event_date') or 'neuvedeny'}
 
 ---
 
@@ -119,8 +150,8 @@ def generate_task_description(analysis,body,sender_email,sender_name):
 {body[:3000]}
 
 ---
-\U0001f4e7 Dopyt prijaty: {today}
-@{aname} prosim spracuj tuto ponuku a odpovedz klientovi na: {sender_email}"""
+Dopyt prijaty: {today}
+@{aname} prosim spracuj tuto ponuku a odpovedz klientovi na: {email_line}"""
 
 def process_info_emails():
     logger.info("Spracuvam INFO Requesty emaily...")
@@ -130,9 +161,10 @@ def process_info_emails():
         workload=get_team_workload(); processed=0
         for email in emails:
             eid=email.get("id",""); subject=email.get("subject","")
-            sender_email,sender_name=get_sender_email(email)
             html_body=email.get("body",{}).get("content","")
             clean_body=strip_html(html_body) if html_body else email.get("bodyPreview","")
+            # Ziskaj kontakt - priamy email alebo z formulara
+            sender_email,sender_name=get_client_contact(email,clean_body)
             try: analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
             except Exception as e: logger.error(f"Analyza: {e}"); mark_email_as_read(eid); continue
             if not analysis.get("is_real_request"):
@@ -156,7 +188,7 @@ def check_deadlines():
             dd=datetime.fromtimestamp(int(dms)/1000); dl=(dd-datetime.now()).days
             u="URGENTNE" if dl<=1 else ("BLIZI SA" if dl<=3 else "Pripomienka")
             add_comment_to_task(t["id"],f"{u}\nDeadline: {dd.strftime('%d.%m.%Y')} ({dl} dni)")
-    except Exception as e: logger.error(f"Deadline err: {e}")
+    except Exception as e: logger.error(f"Deadline: {e}")
 
 def weekly_report():
     logger.info("Tyzdenny report...")
@@ -167,14 +199,14 @@ def weekly_report():
         mc=len([t for t in all_t if any(a["id"]==int(MICHAL_ID) for a in t.get("assignees",[]))])
         pc=len([t for t in all_t if any(a["id"]==int(PETER_ID) for a in t.get("assignees",[]))])
         logger.info(f"Report {now.strftime('%d.%m.%Y')}: M={mc} P={pc} Urgent={len(urg)}")
-    except Exception as e: logger.error(f"Report err: {e}")
+    except Exception as e: logger.error(f"Report: {e}")
 
 def setup_schedule():
     schedule.every().day.at("08:30").do(check_deadlines)
     schedule.every().day.at("09:00").do(process_info_emails)
     schedule.every().day.at("16:00").do(process_info_emails)
     schedule.every().monday.at("08:00").do(weekly_report)
-    logger.info("Scheduler OK: 08:30 deadliny | 09:00+16:00 emaily | pon 08:00 report")
+    logger.info("Scheduler: 08:30 deadliny | 09:00+16:00 emaily | pon 08:00 report")
 
 def main():
     logger.info("BigAgency AI Agent spusteny!")
