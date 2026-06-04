@@ -5,6 +5,7 @@ Automaticky spracuva emaily, vytvara tasky v ClickUp a sleduje deadliny.
 
 import os
 import json
+import re
 import logging
 import schedule
 import time
@@ -27,8 +28,26 @@ MS_USER_EMAIL = "cano@bigagency.sk"
 
 MICHAL_ID = "106588503"
 PETER_ID = "106591392"
-MICHAL_DM_CHANNEL = "2kyr0ekd-735"
-PETER_DM_CHANNEL = "2kyr0ekd-55"
+
+def strip_html(html_text):
+    """Odstrani HTML tagy a vrati cisty text."""
+    if not html_text:
+        return ""
+    # Nahrad bezne HTML entity
+    text = html_text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
+    # Odstran style/script bloky aj s obsahom
+    text = re.sub(r'<style[^>]*>.*?</style>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<script[^>]*>.*?</script>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
+    # Nahrad <br> a <p> novym riadkom
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</p>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</div>', '\n', text, flags=re.IGNORECASE)
+    # Odstran ostatne tagy
+    text = re.sub(r'<[^>]+>', '', text)
+    # Vycisti prazdne riadky
+    lines = [l.strip() for l in text.split('\n')]
+    lines = [l for l in lines if l]
+    return '\n'.join(lines)
 
 def get_ms_token():
     url = f"https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/token"
@@ -48,9 +67,12 @@ def get_unread_emails_from_folder(folder_name="INFO Requesty", limit=15):
     if not folder_id:
         logger.error(f"Priecinok '{folder_name}' nenajdeny!")
         return []
+    # Nacita FULL body (nie len preview) + isRead filter
     url = (f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}"
            f"/mailFolders/{folder_id}/messages"
-           f"?$filter=isRead eq false&$top={limit}&$orderby=receivedDateTime desc")
+           f"?\$filter=isRead eq false&\$top={limit}"
+           f"&\$orderby=receivedDateTime desc"
+           f"&\$select=id,subject,bodyPreview,body,from,sender,replyTo,toRecipients,receivedDateTime")
     emails = requests.get(url, headers=headers).json().get("value", [])
     logger.info(f"Najdenych {len(emails)} neprecitanych emailov v '{folder_name}'")
     return emails
@@ -62,7 +84,6 @@ def mark_email_as_read(email_id):
     requests.patch(
         f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/messages/{email_id}",
         headers=headers, json={"isRead": True})
-    logger.info(f"Email oznaceny ako precitany")
 
 def clickup_get(endpoint):
     return requests.get(f"https://api.clickup.com/api/v2/{endpoint}",
@@ -104,44 +125,58 @@ def get_tasks_with_upcoming_deadlines(days=7):
         f"&due_date_gt={int(now.timestamp()*1000)}&due_date_lt={int(due_before.timestamp()*1000)}")
     return result.get("tasks", [])
 
-def analyze_email_with_claude(email_subject, email_body):
+def analyze_email_with_claude(email_subject, email_body_clean):
+    """Analyzuje cistý (bez HTML) text emailu."""
     prompt = f"""Si asistent eventovej agentury BigAgency. Analyzuj tuto spravu a urc ci je to realny dopyt od klienta.
 
-DOLEZITE: Vela sprav pride cez webovy formular z adresy noreply@bigagency.sk - to je normalne!
+DOLEZITE: Vela sprav pride cez webovy formular z adresy noreply@bigagency.sk.
+V tele spravy hladaj: meno klienta, jeho EMAILOVU ADRESU a telefon ak je uvedeny.
 
 Predmet: {email_subject}
-Obsah spravy: {email_body}
+Obsah spravy (cisty text): {email_body_clean}
 
 Realny dopyt je ak obsahuje popis eventu/podujatia, realne meno, je po slovensky/cesky/anglicky.
 IGNORUJ: rusticnu/ukrajinskunu spravu, newslettery, Profesia.sk, bankove vypisy, brigady.
 
-Odpoved MUSI byt iba ciste JSON:
-{{"is_real_request": true/false, "client_name": "meno", "client_email": "email", "event_description": "popis", "event_date": "datum alebo null", "task_name": "nazov tasku"}}"""
+Odpoved MUSI byt iba ciste JSON bez backticks:
+{{"is_real_request": true/false, "client_name": "meno klienta z tela spravy", "client_email": "emailova adresa klienta z tela spravy (NIE noreply@bigagency.sk)", "client_phone": "telefon ak je v sprave, inak null", "event_description": "kratky popis co chcu", "event_date": "datum ak je zname alebo null", "task_name": "nazov tasku pre ClickUp"}}"""
+
     response = anthropic.messages.create(
         model="claude-sonnet-4-5-20250929", max_tokens=1024,
         messages=[{"role": "user", "content": prompt}])
     raw = response.content[0].text.strip().replace("```json","").replace("```","").strip()
     return json.loads(raw)
 
-def generate_task_description(analysis, email_body):
+def generate_task_description(analysis, email_body_clean):
+    """Vygeneruje popis tasku s cistym textom a kontaktom na klienta."""
     today = datetime.now().strftime("%d.%m.%Y")
     assignee_name = analysis.get("assignee_name", "")
-    return f"""📧 **Dopyt prijaty:** {today}
-👤 **Klient:** {analysis.get('client_name','N/A')} ({analysis.get('client_email','N/A')})
+    client_email = analysis.get('client_email', 'N/A')
+    client_phone = analysis.get('client_phone', '')
+    phone_line = f"\n📞 **Telefon:** {client_phone}" if client_phone else ""
 
-📋 **Popis dopytu:**
+    return f"""📧 **Dopyt prijaty:** {today}
+
+---
+## Kontakt na klienta
+👤 **Meno:** {analysis.get('client_name','N/A')}
+✉️ **Email:** {client_email}{phone_line}
+
+---
+## Popis dopytu
 {analysis.get('event_description','N/A')}
 
 📅 **Termin:** {analysis.get('event_date') or 'neuvedeny'}
 
-📝 **Cely text spravy:**
-{email_body[:1500]}
+---
+## Kompletny text spravy
+{email_body_clean[:3000]}
 
 ---
-@{assignee_name} prosim spracuj tuto ponuku a odpovedz klientovi."""
+@{assignee_name} prosim spracuj tuto ponuku a odpovedz klientovi na: {client_email}"""
 
 def process_info_emails():
-    """Spracuje NEPRECITANE emaily z INFO Requesty (deduplication cez isRead)."""
+    """Spracuje NEPRECITANE emaily z INFO Requesty."""
     logger.info("Spracuvam INFO Requesty emaily...")
     try:
         emails = get_unread_emails_from_folder("INFO Requesty", limit=15)
@@ -153,31 +188,40 @@ def process_info_emails():
         for email in emails:
             email_id = email.get("id", "")
             subject = email.get("subject", "")
-            body = email.get("bodyPreview","") + "\n" + email.get("body",{}).get("content","")
+
+            # Ziskaj HTML body a stripuj ho na cisty text
+            html_body = email.get("body", {}).get("content", "")
+            clean_body = strip_html(html_body) if html_body else email.get("bodyPreview", "")
+
             try:
-                analysis = analyze_email_with_claude(subject, body[:3000])
+                analysis = analyze_email_with_claude(subject, clean_body[:3000])
             except Exception as e:
                 logger.error(f"Chyba analyzy: {e}")
                 mark_email_as_read(email_id)
                 continue
+
             if not analysis.get("is_real_request"):
                 logger.info(f"Ignorovany (spam): {subject[:50]}")
                 mark_email_as_read(email_id)
                 continue
+
             assignee_id, assignee_name = get_less_busy_assignee(workload)
             analysis["assignee_name"] = assignee_name
             if assignee_id == MICHAL_ID:
                 workload["michal"]["count"] += 1
             else:
                 workload["peter"]["count"] += 1
-            description = generate_task_description(analysis, body[:1500])
+
+            description = generate_task_description(analysis, clean_body[:3000])
             task_id = create_task(
                 name=analysis.get("task_name", subject[:100]),
                 description=description, assignee_id=assignee_id, priority="high")
+
             if task_id:
                 processed += 1
-                logger.info(f"Task vytvoreny: {analysis.get('client_name')} -> {assignee_name}")
-                mark_email_as_read(email_id)  # DEDUPLICATION
+                logger.info(f"Task: {analysis.get('client_name')} ({analysis.get('client_email')}) -> {assignee_name}")
+                mark_email_as_read(email_id)
+
         logger.info(f"Spracovanych {processed} novych requestov")
     except Exception as e:
         logger.error(f"Chyba: {e}")
@@ -217,7 +261,7 @@ def setup_schedule():
     schedule.every().day.at("09:00").do(process_info_emails)
     schedule.every().day.at("16:00").do(process_info_emails)
     schedule.every().monday.at("08:00").do(weekly_report)
-    logger.info("Scheduler: 08:30 deadliny | 09:00+16:00 emaily (neprecitane) | pon 08:00 report")
+    logger.info("Scheduler: 08:30 deadliny | 09:00+16:00 emaily | pon 08:00 report")
 
 def main():
     logger.info("BigAgency AI Agent spusteny!")
