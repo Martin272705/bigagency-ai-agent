@@ -23,6 +23,11 @@ def strip_html(t):
     t=re.sub(r'<br\s*/?>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</p>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</div>','\n',t,flags=re.IGNORECASE)
+    t=re.sub(r'<li[^>]*>','\n• ',t,flags=re.IGNORECASE)
+    t=re.sub(r'</li>','',t,flags=re.IGNORECASE)
+    t=re.sub(r'<(?:ul|ol)[^>]*>','\n',t,flags=re.IGNORECASE)
+    t=re.sub(r'</(?:ul|ol)>','\n',t,flags=re.IGNORECASE)
+    t=re.sub(r'</tr>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'<[^>]+>','',t)
     return '\n'.join(l.strip() for l in t.split('\n') if l.strip())
 
