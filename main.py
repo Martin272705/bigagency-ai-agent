@@ -26,16 +26,6 @@ def strip_html(t):
     t=re.sub(r'<[^>]+>','',t)
     return '\n'.join(l.strip() for l in t.split('\n') if l.strip())
 
-def extract_email_from_body(body_text):
-    """Vyhlada emailovu adresu v tele spravy - pouziva sa ked pride cez webovy formular."""
-    emails = re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', body_text)
-    # Ignoruj systemove adresy
-    ignore = ['noreply', 'no-reply', 'bigagency.sk', 'microsoft', 'outlook']
-    for email in emails:
-        if not any(ig in email.lower() for ig in ignore):
-            return email
-    return ""
-
 def get_ms_token():
     return requests.post(f"https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/token",
         data={"grant_type":"client_credentials","client_id":MS_CLIENT_ID,
@@ -59,40 +49,40 @@ def mark_email_as_read(eid):
     requests.patch(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/messages/{eid}",
         headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json={"isRead":True})
 
-def get_client_contact(email, clean_body):
-    """
-    Ziska kontakt klienta - 2 moznosti:
-    1. Priamy email na info@ -> email z From pola
-    2. Webovy formular (noreply@) -> email z tela spravy
-    """
-    from_field = email.get("from", {})
-    from_addr = from_field.get("emailAddress", {}).get("address", "")
-    from_name = from_field.get("emailAddress", {}).get("name", "")
-
-    # Moznost 1: Priamy email - From nie je noreply
+def get_client_contact(email,clean_body):
+    """Kontakt: priamy email z From, alebo z tela pri webovom formulari."""
+    from_addr=email.get("from",{}).get("emailAddress",{}).get("address","")
+    from_name=email.get("from",{}).get("emailAddress",{}).get("name","")
     if from_addr and "noreply" not in from_addr.lower():
-        logger.info(f"Kontakt z From pola: {from_addr}")
-        return from_addr, from_name
-
-    # Moznost 2: Webovy formular - hladame email v tele spravy
-    logger.info("Email od noreply - hladam kontakt v tele spravy (webovy formular)")
-    body_email = extract_email_from_body(clean_body)
-    if body_email:
-        logger.info(f"Kontakt z tela spravy: {body_email}")
-        return body_email, ""
-
-    # Fallback - replyTo pole
-    for r in email.get("replyTo", []):
-        addr = r.get("emailAddress", {}).get("address", "")
-        name = r.get("emailAddress", {}).get("name", "")
-        if addr and "noreply" not in addr.lower():
-            return addr, name
-
-    logger.warning("Kontakt klienta sa nepodarilo zistit!")
-    return "", ""
+        return from_addr,from_name
+    # Webovy formular - hladaj email v tele
+    emails_in_body=re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}',clean_body)
+    for e in emails_in_body:
+        if not any(x in e.lower() for x in ['noreply','no-reply','bigagency','microsoft','outlook']):
+            return e,""
+    for r in email.get("replyTo",[]):
+        addr=r.get("emailAddress",{}).get("address","")
+        name=r.get("emailAddress",{}).get("name","")
+        if addr and "noreply" not in addr.lower(): return addr,name
+    return "",""
 
 def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY}).json()
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
+
+def task_already_exists(task_name):
+    """Skontroluje ci task s rovnakym nazvom uz existuje v liste - zabrani duplikatom."""
+    try:
+        existing=clickup_get(f"list/{CLICKUP_LIST_ID}/task?statuses[]=to do&statuses[]=in progress&statuses[]=complete")
+        for t in existing.get("tasks",[]):
+            # Porovnaj prve 3 slova nazvu (robustne pri malych rozdieloch)
+            existing_words=t.get("name","").lower().split()[:5]
+            new_words=task_name.lower().split()[:5]
+            if existing_words==new_words:
+                logger.warning(f"Task uz existuje: '{t.get('name')}' - preskakujem")
+                return True
+    except Exception as e:
+        logger.error(f"Chyba pri kontrole duplikatov: {e}")
+    return False
 
 def get_team_workload():
     m=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={MICHAL_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
@@ -107,7 +97,7 @@ def create_task(name,desc,aid,priority="high",due_date=None):
     d={"name":name,"markdown_description":desc,"assignees":[int(aid)],"priority":2 if priority=="high" else 3,"status":"to do"}
     if due_date: d["due_date"]=int(due_date.timestamp()*1000)
     r=clickup_post(f"list/{CLICKUP_LIST_ID}/task",d)
-    logger.info(f"Task: {name} (ID:{r.get('id')})")
+    logger.info(f"Task vytvoreny: {name} (ID:{r.get('id')})")
     return r.get("id")
 
 def add_comment_to_task(tid,c): clickup_post(f"task/{tid}/comment",{"comment_text":c})
@@ -132,10 +122,10 @@ def generate_task_description(analysis,body,sender_email,sender_name):
     today=datetime.now().strftime("%d.%m.%Y")
     aname=analysis.get("assignee_name","")
     cname=analysis.get("client_name",sender_name or "N/A")
-    email_line=sender_email if sender_email else "NEPODARILO SA ZISTIT - pozri webovy formular"
+    email_str=sender_email if sender_email else "NEPODARILO SA ZISTIT"
     return f"""## Kontakt na klienta
 **Meno:** {cname}
-**Email:** {email_line}
+**Email:** {email_str}
 
 ---
 
@@ -151,32 +141,37 @@ def generate_task_description(analysis,body,sender_email,sender_name):
 
 ---
 Dopyt prijaty: {today}
-@{aname} prosim spracuj tuto ponuku a odpovedz klientovi na: {email_line}"""
+@{aname} prosim spracuj tuto ponuku a odpovedz klientovi na: {email_str}"""
 
 def process_info_emails():
     logger.info("Spracuvam INFO Requesty emaily...")
     try:
         emails=get_unread_emails_from_folder("INFO Requesty",limit=15)
         if not emails: logger.info("Ziadne nove emaily."); return
-        workload=get_team_workload(); processed=0
+        workload=get_team_workload(); processed=0; skipped_dup=0
         for email in emails:
             eid=email.get("id",""); subject=email.get("subject","")
             html_body=email.get("body",{}).get("content","")
             clean_body=strip_html(html_body) if html_body else email.get("bodyPreview","")
-            # Ziskaj kontakt - priamy email alebo z formulara
             sender_email,sender_name=get_client_contact(email,clean_body)
             try: analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
             except Exception as e: logger.error(f"Analyza: {e}"); mark_email_as_read(eid); continue
             if not analysis.get("is_real_request"):
                 logger.info(f"Ignorovany: {subject[:50]}"); mark_email_as_read(eid); continue
+            task_name=analysis.get("task_name",subject[:100])
+            # DEDUPLICATION: skontroluj ci task uz existuje
+            if task_already_exists(task_name):
+                skipped_dup+=1
+                mark_email_as_read(eid)
+                continue
             aid,aname=get_less_busy_assignee(workload)
             analysis["assignee_name"]=aname
             if aid==MICHAL_ID: workload["michal"]["count"]+=1
             else: workload["peter"]["count"]+=1
             desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name)
-            tid=create_task(analysis.get("task_name",subject[:100]),desc,aid,"high")
+            tid=create_task(task_name,desc,aid,"high")
             if tid: processed+=1; logger.info(f"OK: {sender_email} -> {aname}"); mark_email_as_read(eid)
-        logger.info(f"Spracovanych {processed} requestov")
+        logger.info(f"Spracovanych {processed} requestov, preskoceno duplikatov: {skipped_dup}")
     except Exception as e: logger.error(f"Chyba: {e}")
 
 def check_deadlines():
