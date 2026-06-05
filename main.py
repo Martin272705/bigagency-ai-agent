@@ -69,16 +69,15 @@ def get_client_contact(email,clean_body):
 def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY}).json()
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
 
-def task_already_exists(task_name):
-    """Skontroluje ci task s rovnakym nazvom uz existuje v liste - zabrani duplikatom."""
+def task_already_exists(body_snippet):
+    """Skontroluje duplikat podla obsahu emailu - robustne aj pri 2 dopytoch od toho isteho klienta."""
     try:
-        existing=clickup_get(f"list/{CLICKUP_LIST_ID}/task?statuses[]=to do&statuses[]=in progress&statuses[]=complete")
+        existing=clickup_get(f"list/{CLICKUP_LIST_ID}/task?statuses[]=to do&statuses[]=in progress&statuses[]=complete&include_closed=true")
+        norm_snippet=' '.join(body_snippet.lower().split())[:200]
         for t in existing.get("tasks",[]):
-            # Porovnaj prve 3 slova nazvu (robustne pri malych rozdieloch)
-            existing_words=t.get("name","").lower().split()[:5]
-            new_words=task_name.lower().split()[:5]
-            if existing_words==new_words:
-                logger.warning(f"Task uz existuje: '{t.get('name')}' - preskakujem")
+            desc=(t.get("description") or t.get("text_content") or "")
+            if norm_snippet and norm_snippet in ' '.join(desc.lower().split()):
+                logger.warning(f"Duplikat najdeny podla obsahu emailu: '{t.get('name')}' - preskakujem")
                 return True
     except Exception as e:
         logger.error(f"Chyba pri kontrole duplikatov: {e}")
@@ -160,7 +159,7 @@ def process_info_emails():
                 logger.info(f"Ignorovany: {subject[:50]}"); mark_email_as_read(eid); continue
             task_name=analysis.get("task_name",subject[:100])
             # DEDUPLICATION: skontroluj ci task uz existuje
-            if task_already_exists(task_name):
+            if task_already_exists(clean_body[:200]):
                 skipped_dup+=1
                 mark_email_as_read(eid)
                 continue
