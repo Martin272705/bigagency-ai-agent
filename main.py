@@ -49,15 +49,20 @@ def get_unread_emails_from_folder(folder_name="INFO Requesty",limit=15):
     logger.info(f"Najdenych {len(emails)} neprecitanych emailov")
     return emails
 
-def mark_email_as_read(eid):
-    try:
-        token=get_ms_token()
-        r=requests.patch(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/messages/{eid}",
-            headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json={"isRead":True})
-        if r.status_code not in (200,204):
-            logger.error(f"Nepodarilo sa oznacit email ako precitany: {r.status_code}")
-    except Exception as e:
-        logger.error(f"Chyba pri oznacovani emailu: {e}")
+def mark_email_as_read(eid,retries=3):
+    for attempt in range(retries):
+        try:
+            token=get_ms_token()
+            r=requests.patch(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/messages/{eid}",
+                headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json={"isRead":True})
+            if r.status_code in (200,204):
+                return True
+            logger.warning(f"mark_as_read pokus {attempt+1}: HTTP {r.status_code}")
+        except Exception as e:
+            logger.warning(f"mark_as_read pokus {attempt+1} zlyhal: {e}")
+        time.sleep(2)
+    logger.error(f"Nepodarilo sa oznacit email ako precitany po {retries} pokusoch: {eid}")
+    return False
 
 def get_client_contact(email,clean_body):
     from_addr=email.get("from",{}).get("emailAddress",{}).get("address","")
