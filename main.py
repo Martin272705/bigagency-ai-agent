@@ -44,15 +44,20 @@ def get_unread_emails_from_folder(folder_name="INFO Requesty",limit=15):
     if not fid: logger.error(f"Priecinok '{folder_name}' nenajdeny!"); return []
     url=(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders/{fid}/messages"
          f"?\$filter=isRead eq false&\$top={limit}&\$orderby=receivedDateTime desc"
-         f"&\$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime")
+         f"&\$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId")
     emails=requests.get(url,headers=h).json().get("value",[])
     logger.info(f"Najdenych {len(emails)} neprecitanych emailov")
     return emails
 
 def mark_email_as_read(eid):
-    token=get_ms_token()
-    requests.patch(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/messages/{eid}",
-        headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json={"isRead":True})
+    try:
+        token=get_ms_token()
+        r=requests.patch(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/messages/{eid}",
+            headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json={"isRead":True})
+        if r.status_code not in (200,204):
+            logger.error(f"Nepodarilo sa oznacit email ako precitany: {r.status_code}")
+    except Exception as e:
+        logger.error(f"Chyba pri oznacovani emailu: {e}")
 
 def get_client_contact(email,clean_body):
     from_addr=email.get("from",{}).get("emailAddress",{}).get("address","")
@@ -120,7 +125,7 @@ JSON bez backticks: {{"is_real_request":true/false,"client_name":"meno","event_d
     raw=r.content[0].text.strip().replace("```json","").replace("```","").strip()
     return json.loads(raw)
 
-def generate_task_description(analysis,body,sender_email,sender_name):
+def generate_task_description(analysis,body,sender_email,sender_name,msg_id=""):
     today=datetime.now().strftime("%d.%m.%Y")
     aname=analysis.get("assignee_name","")
     cname=analysis.get("client_name",sender_name or "N/A")
@@ -143,6 +148,7 @@ def generate_task_description(analysis,body,sender_email,sender_name):
 
 ---
 Dopyt prijaty: {today}
+[MSG_ID: {msg_id}]
 @{aname} prosim spracuj tuto ponuku a odpovedz klientovi na: {email_str}"""
 
 def process_info_emails():
