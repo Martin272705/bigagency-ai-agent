@@ -82,18 +82,26 @@ def get_client_contact(email,clean_body):
 def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY}).json()
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
 
-def task_already_exists(task_name):
-    """Zabrani duplikatom - skontroluje ci task s podobnym nazvom uz existuje."""
+def task_already_exists(msg_id,sender_email):
+    """Dvojita dedup kontrola: 1) MSG_ID 2) email odosielatela za 60 dni."""
     try:
-        existing=clickup_get(f"list/{CLICKUP_LIST_ID}/task?page=0")
-        new_key=task_name.lower().strip()[:60]
-        for t in existing.get("tasks",[]):
-            existing_key=t.get("name","").lower().strip()[:60]
-            if existing_key==new_key:
-                logger.warning(f"Duplikat preskoceny: '{t.get('name')}'")
+        if msg_id:
+            r=requests.get(f"https://api.clickup.com/api/v2/team/{CLICKUP_TEAM_ID}/search",
+                headers={"Authorization":CLICKUP_API_KEY},
+                params={"query":msg_id[:80],"types[]":"task"})
+            if r.json().get("tasks",[]):
+                logger.warning(f"Duplikat (MSG_ID) - preskakujem")
+                return True
+        if sender_email and "noreply" not in sender_email.lower():
+            cutoff=int((datetime.now()-timedelta(days=60)).timestamp()*1000)
+            r=requests.get(f"https://api.clickup.com/api/v2/team/{CLICKUP_TEAM_ID}/search",
+                headers={"Authorization":CLICKUP_API_KEY},
+                params={"query":sender_email,"types[]":"task","date_created_gt":cutoff})
+            if r.json().get("tasks",[]):
+                logger.warning(f"Duplikat (email {sender_email} za 60 dni) - preskakujem")
                 return True
     except Exception as e:
-        logger.error(f"Chyba kontroly duplikatov: {e}")
+        logger.error(f"Chyba dedup: {e}")
     return False
 
 def get_team_workload():
@@ -172,15 +180,20 @@ def process_info_emails():
             if not analysis.get("is_real_request"):
                 logger.info(f"Ignorovany: {subject[:50]}"); mark_email_as_read(eid); continue
             task_name=analysis.get("task_name",subject[:100])
-            if task_already_exists(task_name):
+            msg_id=email.get("internetMessageId","") or eid
+            if task_already_exists(msg_id,sender_email):
                 skipped+=1; mark_email_as_read(eid); continue
             aid,aname=get_less_busy_assignee(workload)
             analysis["assignee_name"]=aname
             if aid==MICHAL_ID: workload["michal"]["count"]+=1
             else: workload["peter"]["count"]+=1
-            desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name)
+            desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name,msg_id)
             tid=create_task(task_name,desc,aid,"high")
-            if tid: processed+=1; logger.info(f"OK: {sender_email} -> {aname}"); mark_email_as_read(eid)
+            if tid:
+                    processed+=1; logger.info(f"OK: {sender_email} -> {aname}")
+                    mark_email_as_read(eid)
+                else:
+                    logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit - email zostava unread")
         logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
     except Exception as e: logger.error(f"Chyba: {e}")
 
