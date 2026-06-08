@@ -83,23 +83,22 @@ def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
 
 def task_already_exists(msg_id,sender_email):
-    """Dvojita dedup kontrola: 1) MSG_ID 2) email odosielatela za 60 dni."""
+    """Dedup: nacita tasky zo zoznamu a kontroluje MSG_ID a email priamo v popisoch."""
     try:
-        if msg_id:
-            r=requests.get(f"https://api.clickup.com/api/v2/team/{CLICKUP_TEAM_ID}/search",
-                headers={"Authorization":CLICKUP_API_KEY},
-                params={"query":msg_id[:80],"types[]":"task"})
-            if r.json().get("tasks",[]):
-                logger.warning(f"Duplikat (MSG_ID) - preskakujem")
-                return True
-        if sender_email and "noreply" not in sender_email.lower():
-            cutoff=int((datetime.now()-timedelta(days=60)).timestamp()*1000)
-            r=requests.get(f"https://api.clickup.com/api/v2/team/{CLICKUP_TEAM_ID}/search",
-                headers={"Authorization":CLICKUP_API_KEY},
-                params={"query":sender_email,"types[]":"task","date_created_gt":cutoff})
-            if r.json().get("tasks",[]):
-                logger.warning(f"Duplikat (email {sender_email} za 60 dni) - preskakujem")
-                return True
+        page=0
+        while True:
+            tasks=clickup_get(f"list/{CLICKUP_LIST_ID}/task?page={page}&include_closed=true").get("tasks",[])
+            if not tasks: break
+            for t in tasks:
+                desc=(t.get("description") or "")
+                if msg_id and f"[MSG_ID: {msg_id}]" in desc:
+                    logger.warning(f"Duplikat (MSG_ID) - preskakujem")
+                    return True
+                if sender_email and sender_email.lower() in desc.lower():
+                    logger.warning(f"Duplikat (email {sender_email}) - preskakujem")
+                    return True
+            if len(tasks)<100: break
+            page+=1
     except Exception as e:
         logger.error(f"Chyba dedup: {e}")
     return False
