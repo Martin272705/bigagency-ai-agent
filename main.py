@@ -190,10 +190,10 @@ def process_info_emails():
             desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name,msg_id)
             tid=create_task(task_name,desc,aid,"high")
             if tid:
-                    processed+=1; logger.info(f"OK: {sender_email} -> {aname}")
-                    mark_email_as_read(eid)
-                else:
-                    logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit - email zostava unread")
+                processed+=1; logger.info(f"OK: {sender_email} -> {aname}")
+                mark_email_as_read(eid)
+            else:
+                logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit - email zostava unread")
         logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
     except Exception as e: logger.error(f"Chyba: {e}")
 
