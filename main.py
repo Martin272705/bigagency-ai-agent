@@ -13,7 +13,8 @@ MS_CLIENT_SECRET=os.environ.get("MS_CLIENT_SECRET")
 MS_TENANT_ID=os.environ.get("MS_TENANT_ID")
 MS_USER_EMAIL="cano@bigagency.sk"
 MICHAL_ID="106588503"
-PETER_ID="106591392"
+MARTIN_ID="284426112"
+STANISLAV_ID="106588288"
 
 def strip_html(t):
     if not t: return ""
@@ -105,12 +106,15 @@ def task_already_exists(msg_id,sender_email):
 
 def get_team_workload():
     m=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={MICHAL_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    p=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={PETER_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    logger.info(f"Vytazenost: Michal={m}, Peter={p}")
-    return {"michal":{"id":MICHAL_ID,"count":m},"peter":{"id":PETER_ID,"count":p}}
+    ma=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={MARTIN_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    s=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    logger.info(f"Vytazenost: Michal={m}, Martin={ma}, Stanislav={s}")
+    return {"michal":{"id":MICHAL_ID,"count":m},"martin":{"id":MARTIN_ID,"count":ma},"stanislav":{"id":STANISLAV_ID,"count":s}}
 
 def get_less_busy_assignee(w):
-    return (MICHAL_ID,"Michal Macai") if w["michal"]["count"]<=w["peter"]["count"] else (PETER_ID,"Peter Gerbel")
+    people=[("michal",MICHAL_ID,"Michal Macai"),("martin",MARTIN_ID,"Martin Cano"),("stanislav",STANISLAV_ID,"Stanislav Kois")]
+    least=min(people,key=lambda x:w[x[0]]["count"])
+    return least[1],least[2]
 
 def create_task(name,desc,aid,priority="high",due_date=None):
     d={"name":name,"markdown_description":desc,"assignees":[int(aid)],"priority":2 if priority=="high" else 3,"status":"to do"}
@@ -185,7 +189,8 @@ def process_info_emails():
             aid,aname=get_less_busy_assignee(workload)
             analysis["assignee_name"]=aname
             if aid==MICHAL_ID: workload["michal"]["count"]+=1
-            else: workload["peter"]["count"]+=1
+            elif aid==MARTIN_ID: workload["martin"]["count"]+=1
+            else: workload["stanislav"]["count"]+=1
             desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name,msg_id)
             tid=create_task(task_name,desc,aid,"high")
             if tid:
