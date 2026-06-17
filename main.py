@@ -134,9 +134,10 @@ def analyze_email_with_claude(subject,body,sender_email,sender_name):
 Odosielatel: {sender_name} <{sender_email}>
 Predmet: {subject}
 Obsah: {body}
-Realny dopyt = popis eventu po SK/CZ/EN.
-IGNORUJ: rustinu/ukrajinskunu, newslettery, Profesia.sk, bankove vypisy, brigady.
-JSON bez backticks: {{"is_real_request":true/false,"client_name":"meno","event_description":"popis","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
+Realny dopyt = akakolvek sprava kde niekto nieco chce od BigAgency (event, spoluprace, dopyt na sluzby).
+SPRACUJ AKO REALNY: popis eventu, dopyt na prenajom, firemna akcia, spoluprace agentury/firmy, ponuka partnerstva kde oni hladaju nas ako dodavatela.
+IGNORUJ: rustinu/ukrajinskunu (spam), loterie/kasino spam, brigady (uchadzaci o pracu), bankove vypisy/faktury ktore dostava BigAgency, newslettery ktore nikto nepytal.
+JSON bez backticks: {{"is_real_request":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
     r=anthropic.messages.create(model="claude-sonnet-4-5-20250929",max_tokens=1024,messages=[{"role":"user","content":p}])
     raw=r.content[0].text.strip().replace("```json","").replace("```","").strip()
     return json.loads(raw)
