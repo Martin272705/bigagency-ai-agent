@@ -72,8 +72,8 @@ def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{e
 def normalize(s):
     """Normalizuje nazov na porovnanie - male pismena, bez diakritiky a prebytocnych medzier."""
     s=s.lower().strip()
-    for a,b in [('á','a'),('č','c'),('ď','d'),('é','e'),('í','i'),('ľ','l'),('ĺ','l'),
-                ('ň','n'),('ó','o'),('ô','o'),('ŕ','r'),('š','s'),('ť','t'),('ú','u'),('ý','y'),('ž','z')]:
+    for a,b in [('Ã¡','a'),('Ä','c'),('Ä','d'),('Ã©','e'),('Ã­','i'),('Ä¾','l'),('Äº','l'),
+                ('Å','n'),('Ã³','o'),('Ã´','o'),('Å','r'),('Å¡','s'),('Å¥','t'),('Ãº','u'),('Ã½','y'),('Å¾','z')]:
         s=s.replace(a,b)
     return re.sub(r'\s+',' ',s)
 
@@ -102,10 +102,13 @@ def task_already_exists(msg_id, task_name):
     return False
 
 def get_team_workload():
-    m=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={MICHAL_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    ma=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={MARTIN_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    s=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    logger.info(f"Vytazenost: Michal={m}, Martin={ma}, Stanislav={s}")
+    """Pocita len tasky v zozname Cenove ponuky (To do + In progress)."""
+    base=f"list/{CLICKUP_LIST_ID}/task?include_closed=false"
+    all_tasks=clickup_get(base).get("tasks",[])
+    active=[t for t in all_tasks if t.get("status",{}).get("status","").lower() in ("to do","in progress")]
+    def count(uid): return len([t for t in active if any(str(a.get("id"))==str(uid) for a in t.get("assignees",[]))])
+    m=count(MICHAL_ID); ma=count(MARTIN_ID); s=count(STANISLAV_ID)
+    logger.info(f"Vytazenost (Cenove ponuky): Michal={m}, Martin={ma}, Stanislav={s}")
     return {"michal":{"id":MICHAL_ID,"count":m},"martin":{"id":MARTIN_ID,"count":ma},"stanislav":{"id":STANISLAV_ID,"count":s}}
 
 def get_less_busy_assignee(w):
