@@ -35,35 +35,21 @@ def strip_html(t):
 def get_ms_token():
     return requests.post(f"https://login.microsoftonline.com/{MS_TENANT_ID}/oauth2/v2.0/token",
         data={"grant_type":"client_credentials","client_id":MS_CLIENT_ID,
-              "client_secret":MS_CLIENT_SECRET,"scope":"https://graph.microsoft.com/.default"}).json().get("access_token")
+        "client_secret":MS_CLIENT_SECRET,"scope":"https://graph.microsoft.com/.default"}).json().get("access_token")
 
-def get_unread_emails_from_folder(folder_name="INFO Requesty",limit=15):
+def get_emails_from_folder(folder_name="INFO Requesty",limit=50,days_back=30):
     token=get_ms_token()
     h={"Authorization":f"Bearer {token}"}
     folders=requests.get(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders",headers=h).json()
     fid=next((f["id"] for f in folders.get("value",[]) if f["displayName"].lower()==folder_name.lower()),None)
     if not fid: logger.error(f"Priecinok '{folder_name}' nenajdeny!"); return []
+    since=(datetime.now()-timedelta(days=days_back)).strftime("%Y-%m-%dT%H:%M:%SZ")
     url=(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders/{fid}/messages"
-         f"?\$filter=isRead eq false&\$top={limit}&\$orderby=receivedDateTime desc"
-         f"&\$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId")
+        f"?\$filter=receivedDateTime ge {since}&\$top={limit}&\$orderby=receivedDateTime desc"
+        f"&\$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId")
     emails=requests.get(url,headers=h).json().get("value",[])
-    logger.info(f"Najdenych {len(emails)} neprecitanych emailov")
+    logger.info(f"Najdenych {len(emails)} emailov za poslednych {days_back} dni")
     return emails
-
-def mark_email_as_read(eid,retries=3):
-    for attempt in range(retries):
-        try:
-            token=get_ms_token()
-            r=requests.patch(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/messages/{eid}",
-                headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json={"isRead":True})
-            if r.status_code in (200,204):
-                return True
-            logger.warning(f"mark_as_read pokus {attempt+1}: HTTP {r.status_code}")
-        except Exception as e:
-            logger.warning(f"mark_as_read pokus {attempt+1} zlyhal: {e}")
-        time.sleep(2)
-    logger.error(f"Nepodarilo sa oznacit email ako precitany po {retries} pokusoch: {eid}")
-    return False
 
 def get_client_contact(email,clean_body):
     from_addr=email.get("from",{}).get("emailAddress",{}).get("address","")
@@ -83,8 +69,11 @@ def get_client_contact(email,clean_body):
 def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY}).json()
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
 
-def task_already_exists(msg_id,sender_email):
-    """Dedup: nacita tasky zo zoznamu a kontroluje MSG_ID a email priamo v popisoch."""
+def task_already_exists(msg_id):
+    """Dedup viskuzne podla MSG_ID - unikatne pre kazdy email."""
+    if not msg_id:
+        logger.warning("Prazdne MSG_ID - preskakujem dedup")
+        return False
     try:
         page=0
         while True:
@@ -92,11 +81,8 @@ def task_already_exists(msg_id,sender_email):
             if not tasks: break
             for t in tasks:
                 desc=(t.get("description") or "")
-                if msg_id and f"[MSG_ID: {msg_id}]" in desc:
-                    logger.warning(f"Duplikat (MSG_ID) - preskakujem")
-                    return True
-                if sender_email and sender_email.lower() in desc.lower():
-                    logger.warning(f"Duplikat (email {sender_email}) - preskakujem")
+                if f"[MSG_ID: {msg_id}]" in desc:
+                    logger.warning(f"Duplikat (MSG_ID) - preskakujem: {msg_id[:60]}")
                     return True
             if len(tasks)<100: break
             page+=1
@@ -134,21 +120,24 @@ def analyze_email_with_claude(subject,body,sender_email,sender_name):
 Odosielatel: {sender_name} <{sender_email}>
 Predmet: {subject}
 Obsah: {body}
-BigAgency je eventova agentura - organizuje eventy PRE klientov a pozicuje vybavenie.
-REALNY DOPYT (is_real_request=true) = KLIENT chce aby BigAgency nieco spravila PRE NEHO:
-- chce zorganizovat event, firemnu akciu, teambuilding
-- chce prenajat vybavenie (skaciacie hrady, ninja draha, tanecna podlaha...)
-- pyta sa na cenu/ponuku za sluzby BigAgency
-- agentura/firma hlada BigAgency ako DODAVATELA ich eventu
 
-IGNORUJ (is_real_request=false) = niekto chce nieco OD BigAgency alebo nema nic spolocne:
-- hotely/priestory ponukaju svoju lokalu BigAgency (oni predavaju, nie kupuju)
-- konferencie/veltrhy pozyvaju BigAgency ako navstevnika/kupujuceho
-- vendori/dodavatelia ponukaju svoje produkty/sluzby BigAgency
-- brigady, uchadzaci o pracu
-- spam (rustina, turectina, loterie, kasino)
-- faktury, bankove vypisy
-- newslettery ktore nikto nepytal
+BigAgency je eventova agentura - organizuje eventy PRE klientov a pozicuje/prenajima vybavenie.
+
+REALNY DOPYT (is_real_request=true) = klient alebo firma chce aby BigAgency nieco spravila PRE NICH:
+- chce zorganizovat event, firemnu akciu, teambuilding, vianoce
+- chce prenajat vybavenie (manez, ruske koleso, skaciacie hrady, ninja draha, tanecna podlaha, atrakcie...)
+- pyta sa na cenu/ponuku za sluzby alebo vybavenie BigAgency
+- agentura, firma alebo jednotlivec hlada BigAgency ako DODAVATELA pre ich event alebo projekt
+- POZOR: aj firma z ineho odvetvia (osvetlenie, IT, vyroba...) moze byt klientom - rozhoduje to, ci PYTA sluzby od BigAgency, nie co tato firma robi
+
+IGNORUJ (is_real_request=false) = niekto ponuka nieco BigAgency, alebo email nesuvisi s obchodom:
+- hotely, priestory, lokality ktore PONUKAJU svoju lokalu na eventy BigAgency (oni su dodavatelia)
+- vendori, dodavatelia ktori PONUKAJU svoje produkty alebo sluzby BigAgency
+- konferencie, veltrhy ktore POZYVAJU BigAgency ako navstevnika alebo vystavovatelov
+- uchadzaci o pracu, brigady, staze
+- spam (rusina, turectina, loterie, kasino, kryptomeny)
+- faktury, platobne pripomienky
+- newslettery, marketing ktory nikto nepytal
 
 JSON bez backticks: {{"is_real_request":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
     r=anthropic.messages.create(model="claude-sonnet-4-5-20250929",max_tokens=1024,messages=[{"role":"user","content":p}])
@@ -182,24 +171,24 @@ Dopyt prijaty: {today}
 @{aname} prosim spracuj tuto ponuku a odpovedz klientovi na: {email_str}"""
 
 def process_info_emails():
-    logger.info("Spracuvam INFO Requesty emaily...")
+    logger.info("Spracuvam INFO Requesty emaily (vsetky za 30 dni)...")
     try:
-        emails=get_unread_emails_from_folder("INFO Requesty",limit=15)
-        if not emails: logger.info("Ziadne nove emaily."); return
+        emails=get_emails_from_folder("INFO Requesty",limit=50,days_back=30)
+        if not emails: logger.info("Ziadne emaily."); return
         workload=get_team_workload(); processed=0; skipped=0
         for email in emails:
             eid=email.get("id",""); subject=email.get("subject","")
             html_body=email.get("body",{}).get("content","")
             clean_body=strip_html(html_body) if html_body else email.get("bodyPreview","")
             sender_email,sender_name=get_client_contact(email,clean_body)
-            try: analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
-            except Exception as e: logger.error(f"Analyza: {e}"); mark_email_as_read(eid); continue
-            if not analysis.get("is_real_request"):
-                logger.info(f"Ignorovany: {subject[:50]}"); mark_email_as_read(eid); continue
-            task_name=analysis.get("task_name",subject[:100])
             msg_id=email.get("internetMessageId","") or eid
-            if task_already_exists(msg_id,sender_email):
-                skipped+=1; mark_email_as_read(eid); continue
+            if task_already_exists(msg_id):
+                skipped+=1; logger.info(f"Duplikat preskoceny: {subject[:50]}"); continue
+            try: analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
+            except Exception as e: logger.error(f"Analyza: {e}"); continue
+            if not analysis.get("is_real_request"):
+                logger.info(f"Ignorovany (nie realny dopyt): {subject[:50]}"); continue
+            task_name=analysis.get("task_name",subject[:100])
             aid,aname=get_less_busy_assignee(workload)
             analysis["assignee_name"]=aname
             if aid==MICHAL_ID: workload["michal"]["count"]+=1
@@ -209,10 +198,9 @@ def process_info_emails():
             tid=create_task(task_name,desc,aid,"high")
             if tid:
                 processed+=1; logger.info(f"OK: {sender_email} -> {aname}")
-                mark_email_as_read(eid)
             else:
-                logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit - email zostava unread")
-        logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
+                logger.error(f"CHYBA vytvorenia tasku pre: {sender_email}")
+        logger.info(f"Hotovo: {processed} novych taskov, {skipped} duplikatov preskoceno")
     except Exception as e: logger.error(f"Chyba: {e}")
 
 def check_deadlines():
@@ -233,8 +221,8 @@ def weekly_report():
         now=datetime.now(); we=now+timedelta(days=7)
         urg=[t for t in all_t if t.get("due_date") and datetime.fromtimestamp(int(t["due_date"])/1000)<we]
         mc=len([t for t in all_t if any(a["id"]==int(MICHAL_ID) for a in t.get("assignees",[]))])
-        pc=len([t for t in all_t if any(a["id"]==int(PETER_ID) for a in t.get("assignees",[]))])
-        logger.info(f"Report {now.strftime('%d.%m.%Y')}: M={mc} P={pc} Urgent={len(urg)}")
+        sc=len([t for t in all_t if any(a["id"]==int(STANISLAV_ID) for a in t.get("assignees",[]))])
+        logger.info(f"Report {now.strftime('%d.%m.%Y')}: Michal={mc} Stanislav={sc} Urgent={len(urg)}")
     except Exception as e: logger.error(f"Report: {e}")
 
 def setup_schedule():
@@ -249,6 +237,7 @@ def main():
     missing=[v for v in ["ANTHROPIC_API_KEY","CLICKUP_API_KEY","MS_CLIENT_ID","MS_CLIENT_SECRET","MS_TENANT_ID"] if not os.environ.get(v)]
     if missing: logger.error(f"Chybaju: {missing}"); return
     setup_schedule()
+    process_info_emails()
     logger.info("Cakam na ulohy...")
     while True: schedule.run_pending(); time.sleep(60)
 
