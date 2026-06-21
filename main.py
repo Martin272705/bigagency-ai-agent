@@ -24,7 +24,7 @@ def strip_html(t):
     t=re.sub(r'<br\s*/?>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</p>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</div>','\n',t,flags=re.IGNORECASE)
-    t=re.sub(r'<li[^>]*>','\n• ',t,flags=re.IGNORECASE)
+    t=re.sub(r'<li[^>]*>','\n- ',t,flags=re.IGNORECASE)
     t=re.sub(r'</li>','',t,flags=re.IGNORECASE)
     t=re.sub(r'<(?:ul|ol)[^>]*>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</(?:ul|ol)>','\n',t,flags=re.IGNORECASE)
@@ -69,11 +69,17 @@ def get_client_contact(email,clean_body):
 def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY}).json()
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
 
-def task_already_exists(msg_id):
-    """Dedup viskuzne podla MSG_ID - unikatne pre kazdy email."""
-    if not msg_id:
-        logger.warning("Prazdne MSG_ID - preskakujem dedup")
-        return False
+def normalize(s):
+    """Normalizuje nazov na porovnanie - male pismena, bez diakritiky a prebytocnych medzier."""
+    s=s.lower().strip()
+    for a,b in [('á','a'),('č','c'),('ď','d'),('é','e'),('í','i'),('ľ','l'),('ĺ','l'),
+                ('ň','n'),('ó','o'),('ô','o'),('ŕ','r'),('š','s'),('ť','t'),('ú','u'),('ý','y'),('ž','z')]:
+        s=s.replace(a,b)
+    return re.sub(r'\s+',' ',s)
+
+def task_already_exists(msg_id, task_name):
+    """Dedup: kontroluje MSG_ID v popise aj nazov tasku (pre starstie tasky bez MSG_ID)."""
+    norm_name=normalize(task_name)[:80] if task_name else ""
     try:
         page=0
         while True:
@@ -81,8 +87,13 @@ def task_already_exists(msg_id):
             if not tasks: break
             for t in tasks:
                 desc=(t.get("description") or "")
-                if f"[MSG_ID: {msg_id}]" in desc:
-                    logger.warning(f"Duplikat (MSG_ID) - preskakujem: {msg_id[:60]}")
+                # Primarna kontrola: MSG_ID (exactne, unikatne pre kazdy email)
+                if msg_id and f"[MSG_ID: {msg_id}]" in desc:
+                    logger.warning(f"Duplikat MSG_ID - preskakujem: {msg_id[:50]}")
+                    return True
+                # Sekundarna kontrola: nazov tasku (pre tasky vytvorene pred zavedenim MSG_ID)
+                if norm_name and normalize(t.get("name",""))[:80]==norm_name:
+                    logger.warning(f"Duplikat nazov - preskakujem: {task_name[:60]}")
                     return True
             if len(tasks)<100: break
             page+=1
@@ -135,7 +146,7 @@ IGNORUJ (is_real_request=false) = niekto ponuka nieco BigAgency, alebo email nes
 - vendori, dodavatelia ktori PONUKAJU svoje produkty alebo sluzby BigAgency
 - konferencie, veltrhy ktore POZYVAJU BigAgency ako navstevnika alebo vystavovatelov
 - uchadzaci o pracu, brigady, staze
-- spam (rusina, turectina, loterie, kasino, kryptomeny)
+- spam (rustina, turectina, loterie, kasino, kryptomeny)
 - faktury, platobne pripomienky
 - newslettery, marketing ktory nikto nepytal
 
@@ -182,13 +193,13 @@ def process_info_emails():
             clean_body=strip_html(html_body) if html_body else email.get("bodyPreview","")
             sender_email,sender_name=get_client_contact(email,clean_body)
             msg_id=email.get("internetMessageId","") or eid
-            if task_already_exists(msg_id):
-                skipped+=1; logger.info(f"Duplikat preskoceny: {subject[:50]}"); continue
             try: analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
-            except Exception as e: logger.error(f"Analyza: {e}"); continue
+            except Exception as e: logger.error(f"Analyza zlyhala: {e}"); continue
             if not analysis.get("is_real_request"):
-                logger.info(f"Ignorovany (nie realny dopyt): {subject[:50]}"); continue
+                logger.info(f"Ignorovany (nie realny dopyt): {subject[:60]}"); continue
             task_name=analysis.get("task_name",subject[:100])
+            if task_already_exists(msg_id, task_name):
+                skipped+=1; continue
             aid,aname=get_less_busy_assignee(workload)
             analysis["assignee_name"]=aname
             if aid==MICHAL_ID: workload["michal"]["count"]+=1
@@ -201,7 +212,7 @@ def process_info_emails():
             else:
                 logger.error(f"CHYBA vytvorenia tasku pre: {sender_email}")
         logger.info(f"Hotovo: {processed} novych taskov, {skipped} duplikatov preskoceno")
-    except Exception as e: logger.error(f"Chyba: {e}")
+    except Exception as e: logger.error(f"Chyba procesu: {e}")
 
 def check_deadlines():
     logger.info("Deadliny...")
@@ -235,10 +246,9 @@ def setup_schedule():
 def main():
     logger.info("BigAgency AI Agent spusteny!")
     missing=[v for v in ["ANTHROPIC_API_KEY","CLICKUP_API_KEY","MS_CLIENT_ID","MS_CLIENT_SECRET","MS_TENANT_ID"] if not os.environ.get(v)]
-    if missing: logger.error(f"Chybaju: {missing}"); return
+    if missing: logger.error(f"Chybaju env var: {missing}"); return
     setup_schedule()
-    process_info_emails()
-    logger.info("Cakam na ulohy...")
+    logger.info("Cakam na ulohy... (prve spracovanie emailov o 09:00)")
     while True: schedule.run_pending(); time.sleep(60)
 
 if __name__=="__main__": main()
