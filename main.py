@@ -72,8 +72,8 @@ def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{e
 def normalize(s):
     """Normalizuje nazov na porovnanie - male pismena, bez diakritiky a prebytocnych medzier."""
     s=s.lower().strip()
-    for a,b in [('Ã¡','a'),('Ä','c'),('Ä','d'),('Ã©','e'),('Ã­','i'),('Ä¾','l'),('Äº','l'),
-                ('Å','n'),('Ã³','o'),('Ã´','o'),('Å','r'),('Å¡','s'),('Å¥','t'),('Ãº','u'),('Ã½','y'),('Å¾','z')]:
+    for a,b in [('ÃÂ¡','a'),('ÃÂ','c'),('ÃÂ','d'),('ÃÂ©','e'),('ÃÂ­','i'),('ÃÂ¾','l'),('ÃÂº','l'),
+                ('ÃÂ','n'),('ÃÂ³','o'),('ÃÂ´','o'),('ÃÂ','r'),('ÃÂ¡','s'),('ÃÂ¥','t'),('ÃÂº','u'),('ÃÂ½','y'),('ÃÂ¾','z')]:
         s=s.replace(a,b)
     return re.sub(r'\s+',' ',s)
 
@@ -129,6 +129,18 @@ def get_tasks_with_upcoming_deadlines(days=7):
     now=datetime.now(); db=now+timedelta(days=days)
     return clickup_get(f"team/{CLICKUP_TEAM_ID}/task?statuses[]=to do&statuses[]=in progress&due_date_gt={int(now.timestamp()*1000)}&due_date_lt={int(db.timestamp()*1000)}").get("tasks",[])
 
+def extract_first_json(text):
+    """Extrahuje prvy kompletny JSON objekt z textu - robustne aj ked Claude prida extra text."""
+    start=text.find('{')
+    if start==-1: raise ValueError("Ziadny JSON v odpovedi")
+    depth=0
+    for i,c in enumerate(text[start:],start):
+        if c=='{': depth+=1
+        elif c=='}':
+            depth-=1
+            if depth==0: return json.loads(text[start:i+1])
+    raise ValueError("Nekompletny JSON v odpovedi")
+
 def analyze_email_with_claude(subject,body,sender_email,sender_name):
     p=f"""Si asistent eventovej agentury BigAgency. Analyzuj spravu.
 Odosielatel: {sender_name} <{sender_email}>
@@ -156,7 +168,7 @@ IGNORUJ (is_real_request=false) = niekto ponuka nieco BigAgency, alebo email nes
 JSON bez backticks: {{"is_real_request":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
     r=anthropic.messages.create(model="claude-sonnet-4-5-20250929",max_tokens=1024,messages=[{"role":"user","content":p}])
     raw=r.content[0].text.strip().replace("```json","").replace("```","").strip()
-    return json.loads(raw)
+    return extract_first_json(raw)
 
 def generate_task_description(analysis,body,sender_email,sender_name,msg_id=""):
     today=datetime.now().strftime("%d.%m.%Y")
