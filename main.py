@@ -125,6 +125,37 @@ def create_task(name,desc,aid,priority="high",due_date=None):
 
 def add_comment_to_task(tid,c): clickup_post(f"task/{tid}/comment",{"comment_text":c})
 
+
+def has_stale_reminder(tid):
+    try:
+        comments=clickup_get(f"task/{tid}/comment").get("comments",[])
+        return any("[AUTO-REMINDER]" in (cm.get("comment_text") or "") for cm in comments)
+    except Exception as e:
+        logger.error(f"Chyba has_stale_reminder: {e}")
+        return False
+
+def check_stale_tasks():
+    logger.info("Kontrolujem stale tasky (48h)...")
+    try:
+        cutoff_ms=int((datetime.now()-timedelta(hours=48)).timestamp()*1000)
+        tasks=clickup_get(f"list/{CLICKUP_LIST_ID}/task?statuses[]=to do&date_created_lt={cutoff_ms}").get("tasks",[])
+        reminded=0
+        for task in tasks:
+            tid=task.get("id"); tname=task.get("name","")
+            if has_stale_reminder(tid):
+                logger.info(f"Reminder uz existuje: {tname}"); continue
+            assignees=task.get("assignees",[])
+            names=", ".join(a.get("username","kolega") for a in assignees) if assignees else "tim"
+            created_ms=task.get("date_created")
+            hours_old=int((datetime.now()-datetime.fromtimestamp(int(created_ms)/1000)).total_seconds()/3600) if created_ms else 48
+            age_str=f"{hours_old//24} dni" if hours_old>=48 else f"{hours_old} hodin"
+            comment=f"[AUTO-REMINDER]\n\nAhoj {names},\n\ntento dopyt caka na spracovanie uz {age_str}. Ako to ide? Potrebujes s niecim pomoc?\n\nAk si ho uz zobral/a do riesenia, nezabudni prepnut status na In Progress."
+            add_comment_to_task(tid,comment)
+            reminded+=1; logger.info(f"Reminder: {tname} -> {names}")
+        logger.info(f"Stale remindery: {reminded}")
+    except Exception as e:
+        logger.error(f"Chyba check_stale_tasks: {e}")
+
 def get_tasks_with_upcoming_deadlines(days=7):
     now=datetime.now(); db=now+timedelta(days=days)
     return clickup_get(f"team/{CLICKUP_TEAM_ID}/task?statuses[]=to do&statuses[]=in progress&due_date_gt={int(now.timestamp()*1000)}&due_date_lt={int(db.timestamp()*1000)}").get("tasks",[])
@@ -220,6 +251,7 @@ def process_info_emails():
             if aid==MICHAL_ID: workload["michal"]["count"]+=1
             elif aid==MARTIN_ID: workload["martin"]["count"]+=1
             else: workload["stanislav"]["count"]+=1
+            else: workload["stanislav"]["count"]+=1
             desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name,msg_id)
             tid=create_task(task_name,desc,aid,"high")
             if tid:
@@ -254,6 +286,7 @@ def weekly_report():
 def setup_schedule():
     schedule.every().day.at("08:30").do(check_deadlines)
     schedule.every().day.at("09:00").do(process_info_emails)
+    schedule.every().day.at("10:00").do(check_stale_tasks)
     schedule.every().day.at("16:00").do(process_info_emails)
     schedule.every().monday.at("08:00").do(weekly_report)
     logger.info("Scheduler: 08:30 deadliny | 09:00+16:00 emaily | pon 08:00 report")
