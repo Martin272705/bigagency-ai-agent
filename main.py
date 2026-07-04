@@ -197,7 +197,7 @@ IGNORUJ (is_real_request=false) = niekto ponuka nieco BigAgency, alebo email nes
 - newslettery, marketing ktory nikto nepytal
 
 JSON bez backticks: {{"is_real_request":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
-    r=anthropic.messages.create(model="claude-sonnet-4-5-20250929",max_tokens=1024,messages=[{"role":"user","content":p}])
+    r=anthropic.messages.create(model="claude-sonnet-5",max_tokens=1024,messages=[{"role":"user","content":p}])
     raw=r.content[0].text.strip().replace("```json","").replace("```","").strip()
     return extract_first_json(raw)
 
@@ -220,7 +220,7 @@ def generate_task_description(analysis,body,sender_email,sender_name,msg_id=""):
 ---
 
 ## Kompletny text spravy
-{body[:3000]}
+{body}
 
 ---
 Dopyt prijaty: {today}
@@ -252,7 +252,7 @@ def process_info_emails():
             elif aid==MARTIN_ID: workload["martin"]["count"]+=1
             else: workload["stanislav"]["count"]+=1
             else: workload["stanislav"]["count"]+=1
-            desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name,msg_id)
+            desc=generate_task_description(analysis,clean_body,sender_email,sender_name,msg_id)
             tid=create_task(task_name,desc,aid,"high")
             if tid:
                 processed+=1; logger.info(f"OK: {sender_email} -> {aname}")
