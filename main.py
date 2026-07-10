@@ -79,12 +79,12 @@ def task_already_exists(msg_id,sender_email):
                 logger.warning(f"Duplikat (MSG_ID) - preskakujem")
                 return True
         if sender_email and "noreply" not in sender_email.lower():
-            cutoff=int((datetime.now()-timedelta(days=60)).timestamp()*1000)
+            cutoff=int((datetime.now()-timedelta(days=90)).timestamp()*1000)
             r=requests.get(f"https://api.clickup.com/api/v2/team/{CLICKUP_TEAM_ID}/search",
                 headers={"Authorization":CLICKUP_API_KEY},
                 params={"query":sender_email,"types[]":"task","date_created_gt":cutoff})
             if r.json().get("tasks",[]):
-                logger.warning(f"Duplikat (email {sender_email} za 60 dni) - preskakujem")
+                logger.warning(f"Duplikat (email {sender_email} za 90 dni) - preskakujem")
                 return True
     except Exception as e:
         logger.error(f"Chyba dedup: {e}")
