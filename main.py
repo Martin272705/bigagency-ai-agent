@@ -43,12 +43,12 @@ def get_emails_from_folder(folder_name="INFO Requesty",limit=50):
     folders=requests.get(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders",headers=h).json()
     fid=next((f["id"] for f in folders.get("value",[]) if f["displayName"].lower()==folder_name.lower()),None)
     if not fid: logger.error(f"Priecinok '{folder_name}' nenajdeny!"); return []
-    since=(datetime.now()-timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    since=(datetime.now()-timedelta(hours=25)).strftime("%Y-%m-%dT%H:%M:%SZ")
     url=(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders/{fid}/messages"
          f"?$filter=receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
          f"&$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId")
     emails=requests.get(url,headers=h).json().get("value",[])
-    logger.info(f"Najdenych {len(emails)} emailov za poslednych 30 dni")
+    logger.info(f"Najdenych {len(emails)} emailov za poslednych 25 hodin")
     return emails
 
 def get_client_contact(email,clean_body):
@@ -140,15 +140,16 @@ Obsah: {body}
 
 VYTVOR TASK ak:
 - Klient chce aby BigAgency nieco spravila PRE NEHO (event, prenajom vybavenia, cenova ponuka)
-- Ina agentura hlada BigAgency ako dodavatela/partnera
+- Email moze byt v slovenčine AJ v angličtine - oboje je OK!
 
 IGNORUJ (is_real_request: false):
-- Spam (rustina, turectina, neslovensky obsah)
-- Brigadnici hladajuci pracu (hostesky, pomocnici)
-- Faktury ktore dostava BigAgency
-- Newslettery a marketingove emaily
-- Hotely/priestory/vendori ktori PONUKAJU nieco BigAgency (obrateny smer)
-- Podakovanie za ponuku / odmietnutie
+- Spam (rustina, turectina, nepochopitelny obsah)
+- Faktury ktore dostava BigAgency od dodavatelov (poznas ich podla: "faktura", "invoice", "platba", obsahuju cislo faktury)
+- Dodavatelia/vendori/hotely/priestory ktori PONUKAJU svoje sluzby BigAgency - obrateny smer!
+- Brigadnici a uchadzaci o pracu (hostesky, technici, pomocnici)
+- Newslettery, marketingove emaily, hromadne rozosielky
+- Podakovanie za ponuku alebo odmietnutie ponuky
+- Emaily kde BigAgency je len v kopia (CC) a dopyt nie je priamo na BigAgency
 
 Odpoved ako JSON bez backticks:
 {{"is_real_request":true/false,"client_name":"meno klienta","event_description":"strucny popis dopytu","event_date":"datum alebo null","task_name":"nazov tasku v ClickUp"}}"""
