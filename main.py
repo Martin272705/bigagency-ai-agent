@@ -70,22 +70,30 @@ def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
 
 def task_already_exists(msg_id,sender_email):
+    # POZNAMKA: ClickUp search API nehladá v popisoch taskov - len v názvoch.
+    # Preto čítame tasky priamo z nášho listu a kontrolujeme popis manuálne.
     try:
-        if msg_id:
-            r=requests.get(f"https://api.clickup.com/api/v2/team/{CLICKUP_TEAM_ID}/search",
+        cutoff=int((datetime.now()-timedelta(days=90)).timestamp()*1000)
+        page=0
+        while True:
+            r=requests.get(
+                f"https://api.clickup.com/api/v2/list/{CLICKUP_LIST_ID}/task",
                 headers={"Authorization":CLICKUP_API_KEY},
-                params={"query":msg_id[:80],"types[]":"task"})
-            if r.json().get("tasks",[]):
-                logger.warning(f"Duplikat (MSG_ID) - preskakujem")
-                return True
-        if sender_email and "noreply" not in sender_email.lower():
-            cutoff=int((datetime.now()-timedelta(days=90)).timestamp()*1000)
-            r=requests.get(f"https://api.clickup.com/api/v2/team/{CLICKUP_TEAM_ID}/search",
-                headers={"Authorization":CLICKUP_API_KEY},
-                params={"query":sender_email,"types[]":"task","date_created_gt":cutoff})
-            if r.json().get("tasks",[]):
-                logger.warning(f"Duplikat (email {sender_email} za 90 dni) - preskakujem")
-                return True
+                params={"date_created_gt":cutoff,"include_closed":"true","subtasks":"false","page":page}
+            )
+            tasks=r.json().get("tasks",[])
+            if not tasks: break
+            for task in tasks:
+                desc=task.get("description","")
+                if msg_id and msg_id in desc:
+                    logger.warning(f"Duplikat (MSG_ID v popise) - preskakujem: {task.get('name','')[:50]}")
+                    return True
+                if sender_email and "noreply" not in sender_email.lower():
+                    if sender_email.lower() in desc.lower():
+                        logger.warning(f"Duplikat (email {sender_email} v popise) - preskakujem: {task.get('name','')[:50]}")
+                        return True
+            if len(tasks)<100: break
+            page+=1
     except Exception as e:
         logger.error(f"Chyba dedup: {e}")
     return False
@@ -93,7 +101,7 @@ def task_already_exists(msg_id,sender_email):
 def get_team_workload():
     m=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={MICHAL_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
     ma=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={MARTIN_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    s=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    s=len(clickup_get(f"list/{CLICKUP_LIST_BD}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
     logger.info(f"Vytazenost: Michal={m}, Martin={ma}, Stanislav={s}")
     return {"michal":{"id":MICHAL_ID,"count":m},"martin":{"id":MARTIN_ID,"count":ma},"stanislav":{"id":STANISLAV_ID,"count":s}}
 
