@@ -119,6 +119,18 @@ def create_task(name,desc,aid,priority="high",due_date=None):
 
 def add_comment_to_task(tid,c): clickup_post(f"task/{tid}/comment",{"comment_text":c})
 
+def send_status_email(subject,body):
+    try:
+        token=get_ms_token()
+        requests.post(
+            f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/sendMail",
+            headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},
+            json={"message":{"subject":subject,"body":{"contentType":"Text","content":body},"toRecipients":[{"emailAddress":{"address":"cano@bigagency.sk"}}]}}
+        )
+        logger.info(f"Notifikacia odoslana: {subject}")
+    except Exception as e:
+        logger.error(f"send_status_email chyba: {e}")
+
 def check_stale_tasks():
     logger.info("Kontrola stale taskov (48h)...")
     try:
@@ -192,13 +204,18 @@ def generate_task_description(analysis,body,sender_email,sender_name,msg_id=""):
     )
 
 def process_info_emails():
+    cas=datetime.now().strftime("%H:%M")
     logger.info("Spracuvam INFO Requesty emaily...")
     try:
         emails=get_emails_from_folder("INFO Requesty",limit=50)
-        if not emails: logger.info("Ziadne emaily."); return
+        if not emails:
+            logger.info("Ziadne emaily.")
+            send_status_email(f"✅ Agent {cas} — žiadne nové emaily","Za posledných 25 hodín neboli žiadne nové emaily v INFO Requesty.")
+            return
         workload=get_team_workload()
         processed=0
         skipped=0
+        errors=0
         for email in emails:
             eid=email.get("id","")
             subject=email.get("subject","")
@@ -209,6 +226,7 @@ def process_info_emails():
                 analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
             except Exception as e:
                 logger.error(f"Analyza: {e}")
+                errors+=1
                 continue
             if not analysis.get("is_real_request"):
                 logger.info(f"Ignorovany: {subject[:50]}")
@@ -228,9 +246,16 @@ def process_info_emails():
                 logger.info(f"OK: {sender_email} -> {aname}")
             else:
                 logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit")
+                errors+=1
         logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
+        status="✅" if errors==0 else "⚠️"
+        send_status_email(
+            f"{status} Agent {cas} — nové tasky: {processed}, preskočených: {skipped}",
+            f"Beh {cas}:\n\nNové ClickUp tasky: {processed}\nPreskočené (duplikáty): {skipped}\nChyby pri analýze: {errors}\nCelkovo emailov: {len(emails)}"
+        )
     except Exception as e:
         logger.error(f"Chyba: {e}")
+        send_status_email(f"❌ Agent {cas} CHYBA",f"Agent padol s chybou:\n{e}\n\nSkontroluj Railway logy.")
 
 def setup_schedule():
     schedule.every().day.at("09:00").do(process_info_emails)
