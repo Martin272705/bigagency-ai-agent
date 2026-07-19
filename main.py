@@ -101,7 +101,7 @@ def task_already_exists(msg_id,sender_email):
 def get_team_workload():
     m=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={MICHAL_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
     ma=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={MARTIN_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    s=len(clickup_get(f"list/{CLICKUP_LIST_BD}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    s=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
     logger.info(f"Vytazenost: Michal={m}, Martin={ma}, Stanislav={s}")
     return {"michal":{"id":MICHAL_ID,"count":m},"martin":{"id":MARTIN_ID,"count":ma},"stanislav":{"id":STANISLAV_ID,"count":s}}
 
@@ -162,7 +162,9 @@ IGNORUJ (is_real_request: false):
 Odpoved ako JSON bez backticks:
 {{"is_real_request":true/false,"client_name":"meno klienta","event_description":"strucny popis dopytu","event_date":"datum alebo null","task_name":"nazov tasku v ClickUp"}}"""
     r=anthropic.messages.create(model="claude-sonnet-5",max_tokens=1024,messages=[{"role":"user","content":p}])
-    raw=r.content[0].text.strip()
+    text_block=next((b for b in r.content if hasattr(b,'text')),None)
+    if not text_block: raise ValueError("No text block in Claude response")
+    raw=text_block.text.strip()
     m=re.search(r'\{.*\}',raw,re.DOTALL)
     if m: raw=m.group(0)
     return json.loads(raw)
