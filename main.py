@@ -15,6 +15,7 @@ MS_USER_EMAIL="cano@bigagency.sk"
 MICHAL_ID="106588503"
 MARTIN_ID="284426112"
 STANISLAV_ID="106588288"
+ASSIGNEE_EMAILS={"106588503":"macai@bigagency.sk","284426112":"cano@bigagency.sk","106588288":"kois@bigagency.sk"}
 
 def strip_html(t):
     if not t: return ""
@@ -69,6 +70,22 @@ def get_client_contact(email,clean_body):
 def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY}).json()
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
 
+def start_time_tracking(task_id):
+    try:
+        r=requests.post(f"https://api.clickup.com/api/v2/team/{CLICKUP_TEAM_ID}/time_entries/start",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json={"tid":task_id,"billable":False})
+        if r.status_code in(200,201): logger.info(f"Time tracking: {task_id}"); return True
+        logger.warning(f"Time tracking failed: {r.status_code}"); return False
+    except Exception as e: logger.error(f"start_time_tracking: {e}"); return False
+
+def send_email_via_graph(to_email,subject,body_text):
+    try:
+        token=get_ms_token()
+        msg={"message":{"subject":subject,"body":{"contentType":"Text","content":body_text},"toRecipients":[{"emailAddress":{"address":to_email}}]}}
+        r=requests.post(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/sendMail",headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json=msg)
+        if r.status_code==202: logger.info(f"Email odoslany: {to_email}"); return True
+        logger.warning(f"Email failed: {r.status_code} {r.text[:200]}"); return False
+    except Exception as e: logger.error(f"send_email_via_graph: {e}"); return False
+
 def task_already_exists(msg_id,sender_email):
     # POZNAMKA: ClickUp search API nehladá v popisoch taskov - len v názvoch.
     # Preto čítame tasky priamo z nášho listu a kontrolujeme popis manuálne.
@@ -114,8 +131,10 @@ def create_task(name,desc,aid,priority="high",due_date=None):
     d={"name":name,"markdown_description":desc,"assignees":[int(aid)],"priority":2 if priority=="high" else 3,"status":"to do"}
     if due_date: d["due_date"]=int(due_date.timestamp()*1000)
     r=clickup_post(f"list/{CLICKUP_LIST_ID}/task",d)
-    logger.info(f"Task vytvoreny: {name} (ID:{r.get('id')})")
-    return r.get("id")
+    tid=r.get("id")
+    logger.info(f"Task vytvoreny: {name} (ID:{tid})")
+    if tid: start_time_tracking(tid)
+    return tid
 
 def add_comment_to_task(tid,c): clickup_post(f"task/{tid}/comment",{"comment_text":c})
 
