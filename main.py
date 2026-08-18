@@ -25,7 +25,7 @@ def strip_html(t):
     t=re.sub(r'<br\s*/?>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</p>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</div>','\n',t,flags=re.IGNORECASE)
-    t=re.sub(r'<li[^>]*>','\n• ',t,flags=re.IGNORECASE)
+    t=re.sub(r'<li[^>]*>','\nâ¢ ',t,flags=re.IGNORECASE)
     t=re.sub(r'</li>','',t,flags=re.IGNORECASE)
     t=re.sub(r'<(?:ul|ol)[^>]*>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</(?:ul|ol)>','\n',t,flags=re.IGNORECASE)
@@ -145,7 +145,10 @@ def create_task(name,desc,aid,priority="high",due_date=None):
     if tid: start_time_tracking(tid)
     return tid
 
-def add_comment_to_task(tid,c): clickup_post(f"task/{tid}/comment",{"comment_text":c})
+def add_comment_to_task(tid,c,assignee_id=None):
+    d={"comment_text":c,"notify_all":True}
+    if assignee_id: d["assignee"]=int(assignee_id)
+    clickup_post(f"task/{tid}/comment",d)
 
 def get_tasks_with_upcoming_deadlines(days=7):
     now=datetime.now(); db=now+timedelta(days=days)
