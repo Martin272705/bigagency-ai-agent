@@ -25,7 +25,7 @@ def strip_html(t):
     t=re.sub(r'<br\s*/?>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</p>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</div>','\n',t,flags=re.IGNORECASE)
-    t=re.sub(r'<li[^>]*>','\nâ¢ ',t,flags=re.IGNORECASE)
+    t=re.sub(r'<li[^>]*>','\nÃ¢ÂÂ¢ ',t,flags=re.IGNORECASE)
     t=re.sub(r'</li>','',t,flags=re.IGNORECASE)
     t=re.sub(r'<(?:ul|ol)[^>]*>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</(?:ul|ol)>','\n',t,flags=re.IGNORECASE)
@@ -211,14 +211,14 @@ def process_info_emails():
     try:
         emails=get_unread_emails_from_folder("INFO Requesty",limit=15)
         if not emails: logger.info("Ziadne nove emaily."); return
-        workload=get_team_workload(); processed=0; skipped=0
+        workload=get_team_workload(); processed=0; skipped=0; errors=0
         for email in emails:
             eid=email.get("id",""); subject=email.get("subject","")
             html_body=email.get("body",{}).get("content","")
             clean_body=strip_html(html_body) if html_body else email.get("bodyPreview","")
             sender_email,sender_name=get_client_contact(email,clean_body)
             try: analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
-            except Exception as e: logger.error(f"Analyza: {e}"); mark_email_as_read(eid); continue
+            except Exception as e: logger.error(f"Analyza: {e}"); mark_email_as_read(eid); errors+=1; continue
             if not analysis.get("is_real_request"):
                 logger.info(f"Ignorovany: {subject[:50]}"); mark_email_as_read(eid); continue
             task_name=analysis.get("task_name",subject[:100])
@@ -236,8 +236,13 @@ def process_info_emails():
                 processed+=1; logger.info(f"OK: {sender_email} -> {aname}")
                 mark_email_as_read(eid)
             else:
-                logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit - email zostava unread")
+                logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit - email zostava unread"); errors+=1
         logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
+        cas=datetime.now().strftime("%H:%M")
+        icon="\u2705" if errors==0 else "\u26a0\ufe0f"
+        subj=f"{icon} Agent {cas} \u2014 nov\xe9 tasky: {processed}, presko\u010den\xfdch: {skipped}"
+        body=f"Beh {cas}:\n\nNov\xe9 ClickUp tasky: {processed}\nPresko\u010den\xe9 (duplik\xe1ty): {skipped}\nChyby pri anal\xfdze: {errors}\nCelkovo emailov: {len(emails)}"
+        send_email_via_graph(MS_USER_EMAIL,subj,body)
     except Exception as e: logger.error(f"Chyba: {e}")
 
 def check_unprocessed_tasks():
