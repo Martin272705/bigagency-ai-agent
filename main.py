@@ -25,7 +25,7 @@ def strip_html(t):
     t=re.sub(r'<br\s*/?>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</p>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</div>','\n',t,flags=re.IGNORECASE)
-    t=re.sub(r'<li[^>]*>','\nÃ¢ÂÂ¢ ',t,flags=re.IGNORECASE)
+    t=re.sub(r'<li[^>]*>','\nÃÂ¢ÃÂÃÂ¢ ',t,flags=re.IGNORECASE)
     t=re.sub(r'</li>','',t,flags=re.IGNORECASE)
     t=re.sub(r'<(?:ul|ol)[^>]*>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</(?:ul|ol)>','\n',t,flags=re.IGNORECASE)
@@ -178,7 +178,8 @@ IGNORUJ (is_real_request=false) = niekto chce nieco OD BigAgency alebo nema nic 
 JSON bez backticks: {{"is_real_request":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
     r=anthropic.messages.create(model="claude-sonnet-4-5-20250929",max_tokens=1024,messages=[{"role":"user","content":p}])
     raw=r.content[0].text.strip().replace("```json","").replace("```","").strip()
-    return json.loads(raw)
+    obj,_=json.JSONDecoder().raw_decode(raw)
+    return obj
 
 def generate_task_description(analysis,body,sender_email,sender_name,msg_id=""):
     today=datetime.now().strftime("%d.%m.%Y")
