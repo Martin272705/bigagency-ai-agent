@@ -2,7 +2,7 @@ import os,json,re,logging,schedule,time,requests
 from datetime import datetime,timedelta
 from anthropic import Anthropic
 
-logging.basicConfig(level=logging.INFO,format='%(asctime)s - '(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(levelname)s - %(message)s')
 logger=logging.getLogger(__name__)
 anthropic=Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 CLICKUP_API_KEY=os.environ.get("CLICKUP_API_KEY")
