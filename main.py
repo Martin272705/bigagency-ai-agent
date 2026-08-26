@@ -2,7 +2,7 @@ import os,json,re,logging,schedule,time,requests
 from datetime import datetime,timedelta
 from anthropic import Anthropic
 
-logging.basicConfig(level=logging.INFO,format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO,format='%(asctime)s - '(levelname)s - %(message)s')
 logger=logging.getLogger(__name__)
 anthropic=Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 CLICKUP_API_KEY=os.environ.get("CLICKUP_API_KEY")
@@ -16,16 +16,21 @@ MICHAL_ID="106588503"
 MARTIN_ID="284426112"
 STANISLAV_ID="106588288"
 ASSIGNEE_EMAILS={"106588503":"macai@bigagency.sk","284426112":"cano@bigagency.sk","106588288":"kois@bigagency.sk"}
+PROFIPONUKA_API_KEY=os.environ.get("PROFIPONUKA_API_KEY")
+PROFIPONUKA_BASE="https://app.profiponuka.sk/api"
+PP_CURRENCY_EUR=2512
+PP_LANGUAGE_SK=2282
+PP_STATUS_CREATED=8505
 
 def strip_html(t):
     if not t: return ""
     t=t.replace("&nbsp;"," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">")
     t=re.sub(r'<style[^>]*>.*?</style>',' ',t,flags=re.DOTALL|re.IGNORECASE)
     t=re.sub(r'<script[^>]*>.*?</script>',' ',t,flags=re.DOTALL|re.IGNORECASE)
-    t=re.sub(r'<br\s*/?>','\n',t,flags=re.IGNORECASE)
+    t=re.sub(r'<br\s*/?>',' \n',t,flags=re.IGNORECASE)
     t=re.sub(r'</p>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</div>','\n',t,flags=re.IGNORECASE)
-    t=re.sub(r'<li[^>]*>','\nÃÂ¢ÃÂÃÂ¢ ',t,flags=re.IGNORECASE)
+    t=re.sub(r'<li[^>]*>','\n• ',t,flags=re.IGNORECASE)
     t=re.sub(r'</li>','',t,flags=re.IGNORECASE)
     t=re.sub(r'<(?:ul|ol)[^>]*>','\n',t,flags=re.IGNORECASE)
     t=re.sub(r'</(?:ul|ol)>','\n',t,flags=re.IGNORECASE)
@@ -84,6 +89,49 @@ def get_client_contact(email,clean_body):
 def clickup_get(ep): return requests.get(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY}).json()
 def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{ep}",headers={"Authorization":CLICKUP_API_KEY,"Content-Type":"application/json"},json=d).json()
 
+def pp_get(ep,params=None):
+    try:
+        r=requests.get(f"{PROFIPONUKA_BASE}/{ep}",headers={"Authorization":PROFIPONUKA_API_KEY},params=params)
+        return r.json()
+    except Exception as e: logger.error(f"pp_get {ep}: {e}"); return {}
+
+def pp_post(ep,data):
+    try:
+        r=requests.post(f"{PROFIPONUKA_BASE}/{ep}",headers={"Authorization":PROFIPONUKA_API_KEY},data=data)
+        return r.json()
+    except Exception as e: logger.error(f"pp_post {ep}: {e}"); return {}
+
+def pp_find_or_create_customer(email,name):
+    try:
+        res=pp_get("customer",{"email":email})
+        for c in res.get("records",[]):
+            if c.get("email","").lower()==email.lower():
+                logger.info(f"PP zakaznik najdeny: {c['id']}")
+                return c["id"]
+        ctype="COMPANY" if any(x in name.lower() for x in ["s.r.o","a.s.","spol","ltd","gmbh","a. s."]) else "PERSON"
+        res=pp_post("customer",{"name":name,"email":email,"type":ctype})
+        cid=res.get("id")
+        logger.info(f"PP zakaznik vytvoreny: {cid}")
+        return cid
+    except Exception as e: logger.error(f"pp_find_or_create_customer: {e}"); return None
+
+def pp_create_draft_quote(customer_id,description):
+    try:
+        today=datetime.now().strftime("%Y-%m-%d")
+        valid_until=(datetime.now()+timedelta(days=30)).strftime("%Y-%m-%d")
+        data={"idCustomer":customer_id,"idState":PP_STATUS_CREATED,
+              "idCurrency":PP_CURRENCY_EUR,"idLanguage":PP_LANGUAGE_SK,
+              "date":today,"dateValid":valid_until,"description":description}
+        res=pp_post("price-quote",data)
+        qid=res.get("id")
+        if qid:
+            url=f"https://app.profiponuka.sk/price-quote/{qid}"
+            logger.info(f"PP ponuka vytvorena: {qid}")
+            return qid,url
+        logger.warning(f"PP ponuka failed: {res}")
+        return None,None
+    except Exception as e: logger.error(f"pp_create_draft_quote: {e}"); return None,None
+
 def start_time_tracking(task_id):
     try:
         r=requests.post(f"https://api.clickup.com/api/v2/team/{CLICKUP_TEAM_ID}/time_entries/start",
@@ -104,7 +152,6 @@ def send_email_via_graph(to_email,subject,body_text):
     except Exception as e: logger.error(f"send_email_via_graph: {e}"); return False
 
 def task_already_exists(msg_id,sender_email):
-    """Dedup: nacita tasky zo zoznamu a kontroluje MSG_ID a email priamo v popisoch."""
     try:
         page=0
         while True:
@@ -175,17 +222,20 @@ IGNORUJ (is_real_request=false) = niekto chce nieco OD BigAgency alebo nema nic 
 - faktury, bankove vypisy
 - newslettery ktore nikto nepytal
 
-JSON bez backticks: {{"is_real_request":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
+create_quote=true ak ide o standardny dopyt kde mozno hned pripravit cenovu ponuku (prenajom vybavenia, konkretny event, pyta sa na cenu). false ak ide o velky tender, dlhe rokovanie, alebo klient len pyta vseobecne informacie bez jasneho zameru.
+
+JSON bez backticks: {{"is_real_request":true/false,"create_quote":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
     r=anthropic.messages.create(model="claude-sonnet-4-5-20250929",max_tokens=1024,messages=[{"role":"user","content":p}])
     raw=r.content[0].text.strip().replace("```json","").replace("```","").strip()
     obj,_=json.JSONDecoder().raw_decode(raw)
     return obj
 
-def generate_task_description(analysis,body,sender_email,sender_name,msg_id=""):
+def generate_task_description(analysis,body,sender_email,sender_name,msg_id="",quote_url=None):
     today=datetime.now().strftime("%d.%m.%Y")
     aname=analysis.get("assignee_name","")
     cname=analysis.get("client_name",sender_name or "N/A")
     email_str=sender_email if sender_email else "NEPODARILO SA ZISTIT"
+    quote_section=f"\n---\n\n## Cenová ponuka v ProfiPonuke\n[Otvoriť a doplniť položky]({quote_url})" if quote_url else ""
     return f"""## Kontakt na klienta
 **Meno:** {cname}
 **Email:** {email_str}
@@ -196,6 +246,7 @@ def generate_task_description(analysis,body,sender_email,sender_name,msg_id=""):
 {analysis.get('event_description','N/A')}
 
 **Termin:** {analysis.get('event_date') or 'neuvedeny'}
+{quote_section}
 
 ---
 
@@ -231,19 +282,34 @@ def process_info_emails():
             if aid==MICHAL_ID: workload["michal"]["count"]+=1
             elif aid==MARTIN_ID: workload["martin"]["count"]+=1
             else: workload["stanislav"]["count"]+=1
-            desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name,msg_id)
+            # ProfiPonuka
+            quote_url=None
+            if analysis.get("create_quote") and PROFIPONUKA_API_KEY:
+                cname=analysis.get("client_name",sender_name or "")
+                cid=pp_find_or_create_customer(sender_email,cname) if sender_email else None
+                if cid:
+                    _,quote_url=pp_create_draft_quote(cid,analysis.get("event_description",""))
+            desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name,msg_id,quote_url)
             tid=create_task(task_name,desc,aid,"high")
             if tid:
-                processed+=1; logger.info(f"OK: {sender_email} -> {aname}")
+                processed+=1; logger.info(f"OK: {sender_email} -> {aname}" + (f" | PP: {quote_url}" if quote_url else ""))
+                # Email kolegovi
+                assignee_email=ASSIGNEE_EMAILS.get(str(aid))
+                if assignee_email:
+                    task_url=f"https://app.clickup.com/t/{tid}"
+                    aname_short=aname.split()[0]
+                    pp_line=f"\nCenová ponuka (doplňte položky): {quote_url}" if quote_url else ""
+                    body_email=f"Ahoj {aname_short},\n\nBol ti priradený nový dopyt od klienta.\n\nZákazník: {analysis.get('client_name',sender_email)}\nPopis: {analysis.get('event_description','')[:200]}\n\nTask v ClickUp: {task_url}{pp_line}\n\nBigAgency AI Agent"
+                    send_email_via_graph(assignee_email,f"Nový dopyt: {task_name}",body_email)
                 mark_email_as_read(eid)
             else:
                 logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit - email zostava unread"); errors+=1
         logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
         cas=datetime.now().strftime("%H:%M")
-        icon="\u2705" if errors==0 else "\u26a0\ufe0f"
-        subj=f"{icon} Agent {cas} \u2014 nov\xe9 tasky: {processed}, presko\u010den\xfdch: {skipped}"
-        body=f"Beh {cas}:\n\nNov\xe9 ClickUp tasky: {processed}\nPresko\u010den\xe9 (duplik\xe1ty): {skipped}\nChyby pri anal\xfdze: {errors}\nCelkovo emailov: {len(emails)}"
-        send_email_via_graph(MS_USER_EMAIL,subj,body)
+        icon="✅" if errors==0 else "⚠️"
+        subj=f"{icon} Agent {cas} — nov\xe9 tasky: {processed}, preskočen\xfdch: {skipped}"
+        body_sum=f"Beh {cas}:\n\nNov\xe9 ClickUp tasky: {processed}\nPreskočen\xe9 (duplik\xe1ty): {skipped}\nChyby pri anal\xfdze: {errors}\nCelkovo emailov: {len(emails)}"
+        send_email_via_graph(MS_USER_EMAIL,subj,body_sum)
     except Exception as e: logger.error(f"Chyba: {e}")
 
 def check_unprocessed_tasks():
@@ -272,7 +338,7 @@ def check_unprocessed_tasks():
             elif hours_old>=24 and not has24:
                 add_comment_to_task(tid,f"Dopyt caka na spracovanie uz {int(hours_old)} hodin a stale je v stave to do. [24h REMINDER]")
                 for a in assignees:
-                    em=ASSIGNEE_EMAILS.get(str(a.get("id","")))
+                    em=ASSINGEE_EMAILS.get(str(a.get("id","")))
                     if em:
                         aname=a.get("username","").split()[0]
                         body="\n".join([f"Ahoj {aname},","",f"Dopyt '{tname}' v ClickUp caka uz {int(hours_old)} hodin na spracovanie.","","Prosim skontroluj a odpovedz klientovi co najskor.",f"Link: {task_url}","","BigAgency AI Agent"])
@@ -316,6 +382,7 @@ def main():
     logger.info("BigAgency AI Agent spusteny!")
     missing=[v for v in ["ANTHROPIC_API_KEY","CLICKUP_API_KEY","MS_CLIENT_ID","MS_CLIENT_SECRET","MS_TENANT_ID"] if not os.environ.get(v)]
     if missing: logger.error(f"Chybaju: {missing}"); return
+    if not PROFIPONUKA_API_KEY: logger.warning("PROFIPONUKA_API_KEY nie je nastaveny - PP integrácia vypnuta")
     setup_schedule()
     logger.info("Cakam na ulohy...")
     while True: schedule.run_pending(); time.sleep(60)
