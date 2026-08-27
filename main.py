@@ -49,11 +49,12 @@ def get_unread_emails_from_folder(folder_name="INFO Requesty",limit=15):
     folders=requests.get(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders",headers=h).json()
     fid=next((f["id"] for f in folders.get("value",[]) if f["displayName"].lower()==folder_name.lower()),None)
     if not fid: logger.error(f"Priecinok '{folder_name}' nenajdeny!"); return []
-    url=(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders/{fid}/messages"
-         f"?$filter=isRead eq false&$top={limit}&$orderby=receivedDateTime desc"
+since=(datetime.now()-timedelta(hours=26)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        url=(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders/{fid}/messages"
+         f"?$filter=receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
          f"&$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId")
     emails=requests.get(url,headers=h).json().get("value",[])
-    logger.info(f"Najdenych {len(emails)} neprecitanych emailov")
+    logger.info(f"Najdenych {len(emails)} emailov za poslednych 26 hodin")
     return emails
 
 def mark_email_as_read(eid,retries=3):
