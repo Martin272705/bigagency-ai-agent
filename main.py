@@ -203,7 +203,7 @@ def get_tasks_with_upcoming_deadlines(days=7):
     return clickup_get(f"team/{CLICKUP_TEAM_ID}/task?statuses[]=to do&statuses[]=in progress&due_date_gt={int(now.timestamp()*1000)}&due_date_lt={int(db.timestamp()*1000)}").get("tasks",[])
 
 def analyze_email_with_claude(subject,body,sender_email,sender_name):
-        p=f"""Si asistent eventovej agentury BigAgency. Analyzuj spravu.
+    p=f"""Si asistent eventovej agentury BigAgency. Analyzuj spravu.
 Odosielatel: {sender_name} <{sender_email}>
 Predmet: {subject}
 Obsah: {body}
