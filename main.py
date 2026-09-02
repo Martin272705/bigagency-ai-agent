@@ -203,27 +203,31 @@ def get_tasks_with_upcoming_deadlines(days=7):
     return clickup_get(f"team/{CLICKUP_TEAM_ID}/task?statuses[]=to do&statuses[]=in progress&due_date_gt={int(now.timestamp()*1000)}&due_date_lt={int(db.timestamp()*1000)}").get("tasks",[])
 
 def analyze_email_with_claude(subject,body,sender_email,sender_name):
-    p=f"""Si asistent eventovej agentury BigAgency. Analyzuj spravu.
+        p=f"""Si asistent eventovej agentury BigAgency. Analyzuj spravu.
 Odosielatel: {sender_name} <{sender_email}>
 Predmet: {subject}
 Obsah: {body}
 BigAgency je eventova agentura - organizuje eventy PRE klientov a pozicuje vybavenie.
-REALNY DOPYT (is_real_request=true) = KLIENT chce aby BigAgency nieco spravila PRE NEHO:
-- chce zorganizovat event, firemnu akciu, teambuilding
-- chce prenajat vybavenie (skaciacie hrady, ninja draha, tanecna podlaha...)
-- pyta sa na cenu/ponuku za sluzby BigAgency
-- agentura/firma hlada BigAgency ako DODAVATELA ich eventu
 
-IGNORUJ (is_real_request=false) = niekto chce nieco OD BigAgency alebo nema nic spolocne:
+REALNY DOPYT (is_real_request=true) = klient chce aby BigAgency nieco spravila PRE NEHO:
+- chce zorganizovat event, firemnu akciu, teambuilding, sportovy turnaj, konferenciu
+- chce prenajat vybavenie (skaciacie hrady, ninja draha, tanecna podlaha, stoly, stolicky...)
+- pyta sa na cenu/ponuku za sluzby BigAgency
+- firma/korporat hlada dodavatela na organizaciu eventu - aj ked pisu TENDER znamena ze hladaju dodavatela
+- email z weboveho formulara (subject zacina "WEB kontakt") - vzdy realny dopyt pokial telo emailu nie je spam
+- klient chce aby mu BigAgency zavolala (Zavolame Vam)
+
+IGNORUJ (is_real_request=false):
 - hotely/priestory ponukaju svoju lokalu BigAgency (oni predavaju, nie kupuju)
 - konferencie/veltrhy pozyvaju BigAgency ako navstevnika/kupujuceho
 - vendori/dodavatelia ponukaju svoje produkty/sluzby BigAgency
 - brigady, uchadzaci o pracu
-- spam (rustina, turectina, loterie, kasino)
-- faktury, bankove vypisy
+- spam (rustina, turectina, arabcina, loterie, kasino, darknet)
+- faktury, bankove vypisy, automaticke notifikacie systemov
 - newslettery ktore nikto nepytal
+- app notifikacie ako "is in your phone contacts" alebo podobne
 
-create_quote=true ak ide o standardny dopyt kde mozno hned pripravit cenovu ponuku (prenajom vybavenia, konkretny event, pyta sa na cenu). false ak ide o velky tender, dlhe rokovanie, alebo klient len pyta vseobecne informacie bez jasneho zameru.
+create_quote=true ak ide o konkretny dopyt na prenajom vybavenia alebo event kde mozno hned pripravit ponuku. false ak ide o TENDER alebo klient len pyta vseobecne info.
 
 JSON bez backticks: {{"is_real_request":true/false,"create_quote":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
     r=anthropic.messages.create(model="claude-sonnet-4-5-20250929",max_tokens=1024,messages=[{"role":"user","content":p}])
