@@ -276,6 +276,8 @@ def process_info_emails():
             sender_email,sender_name=get_client_contact(email,clean_body)
             try: analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
             except Exception as e: logger.error(f"Analyza: {e}"); mark_email_as_read(eid); errors+=1; continue
+            logger.info(f"Claude: is_real={analysis.get('is_real_request')} | {subject[:40]}")
+            if subject.lower().startswith("web kontakt"): analysis["is_real_request"]=True; logger.info(f"WEB kontakt override -> realny dopyt")
             if not analysis.get("is_real_request"):
                 logger.info(f"Ignorovany: {subject[:50]}"); mark_email_as_read(eid); continue
             task_name=analysis.get("task_name",subject[:100])
@@ -343,7 +345,7 @@ def check_unprocessed_tasks():
             elif hours_old>=24 and not has24:
                 add_comment_to_task(tid,f"Dopyt caka na spracovanie uz {int(hours_old)} hodin a stale je v stave to do. [24h REMINDER]")
                 for a in assignees:
-                    em=ASSINGEE_EMAILS.get(str(a.get("id","")))
+                    em=ASSIGNEE_EMAILS.get(str(a.get("id","")))
                     if em:
                         aname=a.get("username","").split()[0]
                         body="\n".join([f"Ahoj {aname},","",f"Dopyt '{tname}' v ClickUp caka uz {int(hours_old)} hodin na spracovanie.","","Prosim skontroluj a odpovedz klientovi co najskor.",f"Link: {task_url}","","BigAgency AI Agent"])
