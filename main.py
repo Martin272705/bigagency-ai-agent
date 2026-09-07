@@ -75,7 +75,8 @@ def mark_email_as_read(eid,retries=3):
 def get_client_contact(email,clean_body):
     from_addr=email.get("from",{}).get("emailAddress",{}).get("address","")
     from_name=email.get("from",{}).get("emailAddress",{}).get("name","")
-    if from_addr and "noreply" not in from_addr.lower():
+    skip=["noreply","no-reply","bigagency.sk"]
+    if from_addr and not any(x in from_addr.lower() for x in skip):
         return from_addr,from_name
     emails_in_body=re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}',clean_body)
     for e in emails_in_body:
@@ -277,7 +278,6 @@ def process_info_emails():
             try: analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
             except Exception as e: logger.error(f"Analyza: {e}"); mark_email_as_read(eid); errors+=1; continue
             logger.info(f"Claude: is_real={analysis.get('is_real_request')} | {subject[:40]}")
-            if subject.lower().startswith("web kontakt"): analysis["is_real_request"]=True; logger.info(f"WEB kontakt override -> realny dopyt")
             if not analysis.get("is_real_request"):
                 logger.info(f"Ignorovany: {subject[:50]}"); mark_email_as_read(eid); continue
             task_name=analysis.get("task_name",subject[:100])
