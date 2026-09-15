@@ -143,10 +143,11 @@ def start_time_tracking(task_id):
         logger.warning(f"Time tracking failed: {r.status_code}"); return False
     except Exception as e: logger.error(f"start_time_tracking: {e}"); return False
 
-def send_email_via_graph(to_email,subject,body_text):
+def send_email_via_graph(to_email,subject,body_text,body_html=None):
     try:
         token=get_ms_token()
-        msg={"message":{"subject":subject,"body":{"contentType":"Text","content":body_text},"toRecipients":[{"emailAddress":{"address":to_email}}]}}
+        body_content={"contentType":"HTML","content":body_html} if body_html else {"contentType":"Text","content":body_text}
+        msg={"message":{"subject":subject,"body":body_content,"toRecipients":[{"emailAddress":{"address":to_email}}]}}
         r=requests.post(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/sendMail",
             headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json=msg)
         if r.status_code==202: logger.info(f"Email odoslany: {to_email}"); return True
@@ -339,8 +340,8 @@ def check_unprocessed_tasks():
                     em=ASSIGNEE_EMAILS.get(str(a.get("id","")))
                     if em:
                         aname=a.get("username","").split()[0]
-                        body="\n".join([f"Ahoj {aname},","",f"Dopyt '{tname}' caka uz {int(hours_old)} hodin bez spracovania!","","Klient stale caka na odpoved. Prosim riesit urgentne.","","Ak si uz zacel/a, zmen prosim status v ClickUp na 'In Progress'.",f"Link: {task_url}","","BigAgency AI Agent"])
-                        send_email_via_graph(em,f"URGENTNE - Nespracovany dopyt: {tname}",body)
+                        html=f"""<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px"><h2 style="color:#e53e3e">⚠️ URGENTNÉ — Dopyt čaká {int(hours_old)} hodín!</h2><p>Ahoj {aname},</p><p>Dopyt <strong>'{tname}'</strong> čaká už <strong>{int(hours_old)} hodín</strong> bez spracovania. Klient stále čaká na odpoveď.</p><p style="margin:30px 0"><a href="{task_url}" style="background:#e53e3e;color:white;padding:14px 28px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold">🔴 Otvoriť task v ClickUp</a></p><p style="color:#555;font-size:13px">Keď začneš riešiť, zmeň status na <strong>In Progress</strong>. Keď dokončíš, na <strong>Done</strong>.</p><p style="color:#999;font-size:12px">BigAgency AI Agent</p></body></html>"""
+                        send_email_via_graph(em,f"URGENTNÉ – Nespracovaný dopyt: {tname}",None,html)
                 r72+=1
             elif hours_old>=24 and not has24:
                 add_comment_to_task(tid,f"Dopyt caka na spracovanie uz {int(hours_old)} hodin a stale je v stave to do. [24h REMINDER]")
@@ -348,8 +349,8 @@ def check_unprocessed_tasks():
                     em=ASSIGNEE_EMAILS.get(str(a.get("id","")))
                     if em:
                         aname=a.get("username","").split()[0]
-                        body="\n".join([f"Ahoj {aname},","",f"Dopyt '{tname}' v ClickUp caka uz {int(hours_old)} hodin na spracovanie.","","Prosim skontroluj a odpovedz klientovi co najskor.",f"Link: {task_url}","","BigAgency AI Agent"])
-                        send_email_via_graph(em,f"Nespracovany dopyt v ClickUp: {tname}",body)
+                        html=f"""<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px"><h2 style="color:#d69e2e">⏰ Dopyt čaká na spracovanie ({int(hours_old)} hodín)</h2><p>Ahoj {aname},</p><p>Dopyt <strong>'{tname}'</strong> čaká v ClickUp už {int(hours_old)} hodín na spracovanie.</p><p style="margin:30px 0"><a href="{task_url}" style="background:#3182ce;color:white;padding:14px 28px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold">📋 Otvoriť task v ClickUp</a></p><p style="color:#555;font-size:13px">Odpovedz klientovi čo najskôr a zmeň status na <strong>In Progress</strong>.</p><p style="color:#999;font-size:12px">BigAgency AI Agent</p></body></html>"""
+                        send_email_via_graph(em,f"Nespracovaný dopyt v ClickUp: {tname}",None,html)
                 r24+=1
         logger.info(f"Remindery: 24h={r24}, 72h={r72}")
     except Exception as e: logger.error(f"check_unprocessed_tasks: {e}")
