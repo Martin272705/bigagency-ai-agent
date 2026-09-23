@@ -175,9 +175,9 @@ def task_already_exists(msg_id,sender_email):
     return False
 
 def get_team_workload():
-    m=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={MICHAL_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    ma=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={MARTIN_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    s=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    m=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={MICHAL_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    ma=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={MARTIN_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    s=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
     logger.info(f"Vytazenost: Michal={m}, Martin={ma}, Stanislav={s}")
     return {"michal":{"id":MICHAL_ID,"count":m},"martin":{"id":MARTIN_ID,"count":ma},"stanislav":{"id":STANISLAV_ID,"count":s}}
 
