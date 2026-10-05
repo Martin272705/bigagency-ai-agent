@@ -216,7 +216,7 @@ REALNY DOPYT (is_real_request=true) = klient chce aby BigAgency nieco spravila P
 - chce prenajat vybavenie (skaciacie hrady, ninja draha, tanecna podlaha, stoly, stolicky...)
 - pyta sa na cenu/ponuku za sluzby BigAgency
 - firma/korporat hlada dodavatela na organizaciu eventu - aj ked pisu TENDER znamena ze hladaju dodavatela
-- VZDY realny dopyt: "Ziadost o cenovu ponuku" v subjekte = niekto chce od BigAgency ponuku
+- VZDY realny dopyt: "Ziadost o cenovu ponuku" alebo "Cenova ponuka" v subjekte = niekto chce od BigAgency ponuku (nie ze oni posilaju ponuku BigAgency)
 - VZDY realny dopyt: verejny obstaravatel / verejne obstaravanie - idu nakupovat sluzby OD BigAgency (nie predavat)
 - VZDY realny dopyt: email obsahuje "vyzyvame Vas na predlozenie cenovej ponuky" alebo podobne
 - email z weboveho formulara (subject zacina "WEB kontakt") - vzdy realny dopyt pokial telo emailu nie je spam
