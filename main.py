@@ -270,10 +270,11 @@ Dopyt prijaty: {today}
 
 def process_info_emails():
     logger.info("Spracuvam INFO Requesty emaily...")
+    processed=0; skipped=0; errors=0
     try:
         emails=get_unread_emails_from_folder("INFO Requesty",limit=15)
-        if not emails: logger.info("Ziadne nove emaily."); return
-        workload=get_team_workload(); processed=0; skipped=0; errors=0
+        if not emails: logger.info("Ziadne nove emaily.")
+        workload=get_team_workload()
         for email in emails:
             eid=email.get("id",""); subject=email.get("subject","")
             html_body=email.get("body",{}).get("content","")
@@ -315,13 +316,13 @@ def process_info_emails():
                 mark_email_as_read(eid)
             else:
                 logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit - email zostava unread"); errors+=1
-        logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
-        cas=datetime.now().strftime("%H:%M")
-        icon="✅" if errors==0 else "⚠️"
-        subj=f"{icon} Agent {cas} — nov\xe9 tasky: {processed}, preskočen\xfdch: {skipped}"
-        body_sum=f"Beh {cas}:\n\nNov\xe9 ClickUp tasky: {processed}\nPreskočen\xe9 (duplik\xe1ty): {skipped}\nChyby pri anal\xfdze: {errors}\nCelkovo emailov: {len(emails)}"
-        send_email_via_graph(MS_USER_EMAIL,subj,body_sum)
-    except Exception as e: logger.error(f"Chyba: {e}")
+    except Exception as e: logger.error(f"Chyba: {e}"); errors+=1
+    logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
+    cas=datetime.now().strftime("%H:%M")
+    icon="✅" if errors==0 else "⚠️"
+    subj=f"{icon} Agent {cas} — nov\xe9 tasky: {processed}, preskočen\xfdch: {skipped}"
+    body_sum=f"Beh {cas}:\n\nNov\xe9 ClickUp tasky: {processed}\nPreskočen\xe9 (duplik\xe1ty): {skipped}\nChyby pri anal\xfdze: {errors}\nCelkovo emailov: {len(emails)}"
+    send_email_via_graph(MS_USER_EMAIL,subj,body_sum)
 
 def check_unprocessed_tasks():
     """24h a 72h reminder pre tasky v to do statuse."""
