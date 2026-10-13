@@ -219,7 +219,7 @@ REALNY DOPYT (is_real_request=true) = klient chce aby BigAgency nieco spravila P
 - VZDY realny dopyt: "Ziadost o cenovu ponuku" alebo "Cenova ponuka" v subjekte = niekto chce od BigAgency ponuku (nie ze oni posilaju ponuku BigAgency)
 - VZDY realny dopyt: verejny obstaravatel / verejne obstaravanie - idu nakupovat sluzby OD BigAgency (nie predavat)
 - VZDY realny dopyt: email obsahuje "vyzyvame Vas na predlozenie cenovej ponuky" alebo podobne
-- email z weboveho formulara (subject zacina "WEB kontakt") - vzdy realny dopyt pokial telo emailu nie je spam
+- email z weboveho formulara (subject zacina "WEB kontakt") - VZDY realny dopyt, ignoruj len ak je pisany v cudzom jazyku (rustina, arabcina) alebo je ocividny spam bez temy
 - klient chce aby mu BigAgency zavolala (Zavolame Vam)
 
 IGNORUJ (is_real_request=false):
@@ -227,7 +227,7 @@ IGNORUJ (is_real_request=false):
 - konferencie/veltrhy pozyvaju BigAgency ako navstevnika/kupujuceho
 - vendori/dodavatelia ponukaju svoje produkty/sluzby BigAgency
 - brigady, uchadzaci o pracu
-- spam (rustina, turectina, arabcina, loterie, kasino, darknet)
+- spam (rustina, turectina, arabcina, loterie, darknet)
 - faktury, bankove vypisy, automaticke notifikacie systemov
 - newslettery ktore nikto nepytal
 - app notifikacie ako "is in your phone contacts" alebo podobne
