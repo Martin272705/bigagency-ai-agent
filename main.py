@@ -270,7 +270,7 @@ Dopyt prijaty: {today}
 
 def process_info_emails():
     logger.info("Spracuvam INFO Requesty emaily...")
-    processed=0; skipped=0; errors=0
+    processed=0; skipped=0; errors=0; emails=[]
     try:
         emails=get_unread_emails_from_folder("INFO Requesty",limit=15)
         if not emails: logger.info("Ziadne nove emaily.")
