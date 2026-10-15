@@ -275,8 +275,8 @@ def process_info_emails():
         emails=get_unread_emails_from_folder("INFO Requesty",limit=15)
         if not emails: logger.info("Ziadne nove emaily.")
         workload=get_team_workload()
-seen_in_run=set()
-                for email in emails:
+        seen_in_run=set()
+        for email in emails:
             eid=email.get("id",""); subject=email.get("subject","")
             html_body=email.get("body",{}).get("content","")
             clean_body=strip_html(html_body) if html_body else email.get("bodyPreview","")
