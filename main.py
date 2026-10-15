@@ -347,7 +347,7 @@ def check_unprocessed_tasks():
                 for a in assignees:
                     em=ASSIGNEE_EMAILS.get(str(a.get("id","")))
                     if em:
-                        aname=a.get("username","").split()[0]
+                        aname=(a.get("username","").split() or [""])[0]
                         html=f"""<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px"><h2 style="color:#e53e3e">⚠️ URGENTNÉ — Dopyt čaká {int(hours_old)} hodín!</h2><p>Ahoj {aname},</p><p>Dopyt <strong>'{tname}'</strong> čaká už <strong>{int(hours_old)} hodín</strong> bez spracovania. Klient stále čaká na odpoveď.</p><p style="margin:30px 0"><a href="{task_url}" style="background:#e53e3e;color:white;padding:14px 28px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold">🔴 Otvoriť task v ClickUp</a></p><p style="color:#555;font-size:13px">Klient čaká 3+ dni. Prosím vybav urgentne a odpovedz mu čo najskôr.</p><p style="color:#999;font-size:12px">BigAgency AI Agent</p></body></html>"""
                         send_email_via_graph(em,f"URGENTNÉ – Nespracovaný dopyt: {tname}",None,html)
                 r72+=1
@@ -356,7 +356,7 @@ def check_unprocessed_tasks():
                 for a in assignees:
                     em=ASSIGNEE_EMAILS.get(str(a.get("id","")))
                     if em:
-                        aname=a.get("username","").split()[0]
+                        aname=(a.get("username","").split() or [""])[0]
                         html=f"""<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px"><h2 style="color:#d69e2e">⏰ Dopyt čaká na spracovanie ({int(hours_old)} hodín)</h2><p>Ahoj {aname},</p><p>Dopyt <strong>'{tname}'</strong> čaká v ClickUp už {int(hours_old)} hodín na spracovanie.</p><p style="margin:30px 0"><a href="{task_url}" style="background:#3182ce;color:white;padding:14px 28px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold">📋 Otvoriť task v ClickUp</a></p><p style="color:#555;font-size:13px">Prosím odpovedz klientovi čo najskôr.</p><p style="color:#999;font-size:12px">BigAgency AI Agent</p></body></html>"""
                         send_email_via_graph(em,f"Nespracovaný dopyt v ClickUp: {tname}",None,html)
                 r24+=1
@@ -402,6 +402,10 @@ def main():
     if not PROFIPONUKA_API_KEY: logger.warning("PROFIPONUKA_API_KEY nie je nastaveny - PP integrácia vypnuta")
     setup_schedule()
     logger.info("Cakam na ulohy...")
-    while True: schedule.run_pending(); time.sleep(60)
+    while True:
+        try: schedule.run_pending()
+        except Exception as e: logger.error(f"Scheduler chyba: {e}")
+        time.sleep(60)
+
 
 if __name__=="__main__": main()
