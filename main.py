@@ -51,7 +51,7 @@ def get_unread_emails_from_folder(folder_name="INFO Requesty",limit=15):
     if not fid: logger.error(f"Priecinok '{folder_name}' nenajdeny!"); return []
     since=(datetime.now()-timedelta(hours=26)).strftime("%Y-%m-%dT%H:%M:%SZ")
     url=(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders/{fid}/messages"
-         f"?$filter=receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
+         f"?$filter=isRead eq false and receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
          f"&$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId")
     emails=requests.get(url,headers=h).json().get("value",[])
     logger.info(f"Najdenych {len(emails)} emailov za poslednych 26 hodin")
@@ -275,7 +275,8 @@ def process_info_emails():
         emails=get_unread_emails_from_folder("INFO Requesty",limit=15)
         if not emails: logger.info("Ziadne nove emaily.")
         workload=get_team_workload()
-        for email in emails:
+seen_in_run=set()
+                for email in emails:
             eid=email.get("id",""); subject=email.get("subject","")
             html_body=email.get("body",{}).get("content","")
             clean_body=strip_html(html_body) if html_body else email.get("bodyPreview","")
@@ -287,6 +288,9 @@ def process_info_emails():
                 logger.info(f"Ignorovany: {subject[:50]}"); mark_email_as_read(eid); continue
             task_name=analysis.get("task_name",subject[:100])
             msg_id=email.get("internetMessageId","") or eid
+            dedup_key=msg_id or sender_email
+            if dedup_key in seen_in_run:
+                skipped+=1; mark_email_as_read(eid); continue
             if task_already_exists(msg_id,sender_email):
                 skipped+=1; mark_email_as_read(eid); continue
             aid,aname=get_less_busy_assignee(workload)
@@ -304,7 +308,7 @@ def process_info_emails():
             desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name,msg_id,quote_url)
             tid=create_task(task_name,desc,aid,"high")
             if tid:
-                processed+=1; logger.info(f"OK: {sender_email} -> {aname}" + (f" | PP: {quote_url}" if quote_url else ""))
+                processed+=1; seen_in_run.add(dedup_key); logger.info(f"OK: {sender_email} -> {aname}" + (f" | PP: {quote_url}" if quote_url else ""))
                 # Email kolegovi
                 assignee_email=ASSIGNEE_EMAILS.get(str(aid))
                 if assignee_email:
