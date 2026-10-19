@@ -51,7 +51,7 @@ def get_unread_emails_from_folder(folder_name="INFO Requesty",limit=15):
     if not fid: logger.error(f"Priecinok '{folder_name}' nenajdeny!"); return []
     since=(datetime.now()-timedelta(hours=26)).strftime("%Y-%m-%dT%H:%M:%SZ")
     url=(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders/{fid}/messages"
-         f"?$filter=isRead eq false and receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
+         f"?$filter=receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
          f"&$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId")
     emails=requests.get(url,headers=h).json().get("value",[])
     logger.info(f"Najdenych {len(emails)} emailov za poslednych 26 hodin")
