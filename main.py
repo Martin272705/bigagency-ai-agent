@@ -7,7 +7,7 @@ logger=logging.getLogger(__name__)
 anthropic=Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 CLICKUP_API_KEY=os.environ.get("CLICKUP_API_KEY")
 CLICKUP_TEAM_ID="90152385133"
-CLICKUP_LIST_ID="901521595520"
+CLICKUP_LIST_ID="901521595520
 MS_CLIENT_ID=os.environ.get("MS_CLIENT_ID")
 MS_CLIENT_SECRET=os.environ.get("MS_CLIENT_SECRET")
 MS_TENANT_ID=os.environ.get("MS_TENANT_ID")
@@ -213,7 +213,8 @@ BigAgency je eventova agentura - organizuje eventy PRE klientov a pozicuje vybav
 
 REALNY DOPYT (is_real_request=true) = klient chce aby BigAgency nieco spravila PRE NEHO:
 - chce zorganizovat event, firemnu akciu, teambuilding, sportovy turnaj, konferenciu
-- chce prenajat vybavenie (skaciacie hrady, ninja draha, tanecna podlaha, stoly, stolicky...)
+- chce prenajat vybavenie (skaciacie hrady, ninja draha, tanecna podlaha, stoly, stolicky, casomiera, timing pre beh/event...)
+- klient pyta casomieru / timing pre sportovy event alebo beh - VZDY realny dopyt
 - pyta sa na cenu/ponuku za sluzby BigAgency
 - firma/korporat hlada dodavatela na organizaciu eventu - aj ked pisu TENDER znamena ze hladaju dodavatela
 - VZDY realny dopyt: "Ziadost o cenovu ponuku" alebo "Cenova ponuka" v subjekte = niekto chce od BigAgency ponuku (nie ze oni posilaju ponuku BigAgency)
