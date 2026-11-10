@@ -165,9 +165,7 @@ def task_already_exists(msg_id,sender_email):
                 if msg_id and f"[MSG_ID: {msg_id}]" in desc:
                     logger.warning(f"Duplikat (MSG_ID) - preskakujem")
                     return True
-                if sender_email and sender_email.lower() in desc.lower():
-                    logger.warning(f"Duplikat (email {sender_email}) - preskakujem")
-                    return True
+                        return True
             if len(tasks)<100: break
             page+=1
     except Exception as e:
@@ -213,14 +211,14 @@ BigAgency je eventova agentura - organizuje eventy PRE klientov a pozicuje vybav
 
 REALNY DOPYT (is_real_request=true) = klient chce aby BigAgency nieco spravila PRE NEHO:
 - chce zorganizovat event, firemnu akciu, teambuilding, sportovy turnaj, konferenciu
-- chce prenajat vybavenie (skaciacie hrady, ninja draha, tanecna podlaha, stoly, stolicky, casomiera, timing pre beh/event...)
+- chce prenajat vybavenie alebo nabytok (skaciacie hrady, ninja draha, tanecna podlaha, stoly, stolicky, stand-by stoly, barove stolicce, kolotoc, detske atrakcie, casomiera, timing pre beh/event...)
 - klient pyta casomieru / timing pre sportovy event alebo beh - VZDY realny dopyt
 - pyta sa na cenu/ponuku za sluzby BigAgency
 - firma/korporat hlada dodavatela na organizaciu eventu - aj ked pisu TENDER znamena ze hladaju dodavatela
 - VZDY realny dopyt: "Ziadost o cenovu ponuku" alebo "Cenova ponuka" v subjekte = niekto chce od BigAgency ponuku (nie ze oni posilaju ponuku BigAgency)
 - VZDY realny dopyt: verejny obstaravatel / verejne obstaravanie - idu nakupovat sluzby OD BigAgency (nie predavat)
 - VZDY realny dopyt: email obsahuje "vyzyvame Vas na predlozenie cenovej ponuky" alebo podobne
-- email z weboveho formulara (subject zacina "WEB kontakt") - VZDY realny dopyt, ignoruj len ak je pisany v cudzom jazyku (rustina, arabcina) alebo je ocividny spam bez temy
+- VZDY realny dopyt: email z weboveho formulara kde subject zacina "WEB kontakt" - AUTOMATICKY je to realny dopyt, ignoruj JEDINE ak je cely obsah v cudzom jazyku (rustina, arabcina) alebo je to ocividny spam
 - klient chce aby mu BigAgency zavolala (Zavolame Vam)
 
 IGNORUJ (is_real_request=false):
