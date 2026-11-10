@@ -392,6 +392,7 @@ def setup_schedule():
     schedule.every().day.at("09:00").do(process_info_emails)
     schedule.every().day.at("10:00").do(check_unprocessed_tasks)
     schedule.every().day.at("12:00").do(process_info_emails)
+    schedule.every().day.at("13:00").do(process_info_emails)
     schedule.every().day.at("16:00").do(process_info_emails)
     schedule.every().monday.at("08:00").do(weekly_report)
     logger.info("Scheduler: 08:30 deadliny | 09:00+12:00+16:00 emaily | 10:00 remindery | pon 08:00 report")
