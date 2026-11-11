@@ -165,7 +165,6 @@ def task_already_exists(msg_id,sender_email):
                 if msg_id and f"[MSG_ID: {msg_id}]" in desc:
                     logger.warning(f"Duplikat (MSG_ID) - preskakujem")
                     return True
-                        return True
             if len(tasks)<100: break
             page+=1
     except Exception as e:
