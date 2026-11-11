@@ -156,6 +156,7 @@ def send_email_via_graph(to_email,subject,body_text,body_html=None):
 
 def task_already_exists(msg_id,sender_email):
     try:
+        cutoff=int((datetime.now()-timedelta(hours=24)).timestamp()*1000)
         page=0
         while True:
             tasks=clickup_get(f"list/{CLICKUP_LIST_ID}/task?page={page}&include_closed=true").get("tasks",[])
@@ -165,6 +166,11 @@ def task_already_exists(msg_id,sender_email):
                 if msg_id and f"[MSG_ID: {msg_id}]" in desc:
                     logger.warning(f"Duplikat (MSG_ID) - preskakujem")
                     return True
+                if sender_email and sender_email.lower() in desc.lower():
+                    created=int(t.get("date_created") or 0)
+                    if created>cutoff:
+                        logger.warning(f"Duplikat (rovnaky odosielatel za 24h) - preskakujem")
+                        return True
             if len(tasks)<100: break
             page+=1
     except Exception as e:
