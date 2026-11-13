@@ -240,7 +240,9 @@ create_quote=true ak ide o konkretny dopyt na prenajom vybavenia alebo event kde
 
 JSON bez backticks: {{"is_real_request":true/false,"create_quote":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
     r=anthropic.messages.create(model="claude-haiku-5-5",max_tokens=1024,messages=[{"role":"user","content":p}])
-    raw=r.content[0].text.strip().replace("```json","").replace("```","").strip()
+    text_blocks=[b for b in r.content if hasattr(b,"text")]
+    if not text_blocks: logger.error("Analyza: ziadny TextBlock v odpovedi"); return None
+    raw=text_blocks[0].text.strip().replace("```json","").replace("```","").strip()
     obj,_=json.JSONDecoder().raw_decode(raw)
     return obj
 
