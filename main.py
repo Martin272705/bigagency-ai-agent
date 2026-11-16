@@ -163,7 +163,7 @@ def task_already_exists(msg_id,sender_email):
             if not tasks: break
             for t in tasks:
                 desc=(t.get("description") or "")
-                if msg_id and f"[MSG_ID: {msg_id}]" in desc:
+                if msg_id and (f"[MSG_ID: {msg_id}]" in desc or f"[MSG\_ID: {msg_id}]" in desc or msg_id in desc):
                     logger.warning(f"Duplikat (MSG_ID) - preskakujem")
                     return True
                 if sender_email and sender_email.lower() in desc.lower():
@@ -227,7 +227,7 @@ REALNY DOPYT (is_real_request=true) = klient chce aby BigAgency nieco spravila P
 - klient chce aby mu BigAgency zavolala (Zavolame Vam)
 
 IGNORUJ (is_real_request=false):
-- hotely/priestory ponukaju svoju lokalu BigAgency (oni predavaju, nie kupuju)
+- hotely/priestory/venues ponukaju svoju lokalu, priestory alebo sluzby BigAgency (oni predavaju, nie kupuju) - IGNORUJ aj ked pisu "spolupracu" alebo "partnerstvo"
 - konferencie/veltrhy pozyvaju BigAgency ako navstevnika/kupujuceho
 - vendori/dodavatelia ponukaju svoje produkty/sluzby BigAgency
 - brigady, uchadzaci o pracu
