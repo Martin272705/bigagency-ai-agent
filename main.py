@@ -377,6 +377,9 @@ def check_deadlines():
             if not dms: continue
             dd=datetime.fromtimestamp(int(dms)/1000); dl=(dd-datetime.now()).days
             u="URGENTNE" if dl<=1 else ("BLIZI SA" if dl<=3 else "Pripomienka")
+            marker=f"Deadline: {dd.strftime('%d.%m.%Y')}"
+            ctexts=[(c.get("comment_text") or "") for c in clickup_get(f"task/{t['id']}/comment").get("comments",[])]
+            if any(marker in ct for ct in ctexts): continue
             add_comment_to_task(t["id"],f"{u}\nDeadline: {dd.strftime('%d.%m.%Y')} ({dl} dni)")
     except Exception as e: logger.error(f"Deadline: {e}")
 
