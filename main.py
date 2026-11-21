@@ -21,6 +21,26 @@ PROFIPONUKA_BASE="https://app.profiponuka.sk/api"
 PP_CURRENCY_EUR=2512
 PP_LANGUAGE_SK=2282
 PP_STATUS_CREATED=8505
+PROCESSED_IDS_FILE="processed_msg_ids.json"
+
+def load_processed_ids():
+    try:
+        if os.path.exists(PROCESSED_IDS_FILE):
+            with open(PROCESSED_IDS_FILE) as f:
+                return set(json.load(f))
+    except Exception as e:
+        logger.warning(f"load_processed_ids: {e}")
+    return set()
+
+def save_processed_id(msg_id):
+    try:
+        ids=load_processed_ids()
+        ids.add(msg_id)
+        ids_list=list(ids)[-2000:]
+        with open(PROCESSED_IDS_FILE,'w') as f:
+            json.dump(ids_list,f)
+    except Exception as e:
+        logger.warning(f"save_processed_id: {e}")
 
 def strip_html(t):
     if not t: return ""
@@ -49,12 +69,12 @@ def get_unread_emails_from_folder(folder_name="INFO Requesty",limit=15):
     folders=requests.get(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders",headers=h).json()
     fid=next((f["id"] for f in folders.get("value",[]) if f["displayName"].lower()==folder_name.lower()),None)
     if not fid: logger.error(f"Priecinok '{folder_name}' nenajdeny!"); return []
-    since=(datetime.now()-timedelta(hours=26)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    since=(datetime.now()-timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
     url=(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders/{fid}/messages"
-         f"?$filter=receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
-         f"&$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId")
+         f"?$filter=isRead eq false and receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
+         f"&$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId,isRead")
     emails=requests.get(url,headers=h).json().get("value",[])
-    logger.info(f"Najdenych {len(emails)} emailov za poslednych 26 hodin")
+    logger.info(f"Najdenych {len(emails)} neprecitanych emailov za poslednych 48 hodin")
     return emails
 
 def mark_email_as_read(eid,retries=3):
@@ -75,10 +95,9 @@ def mark_email_as_read(eid,retries=3):
 def get_client_contact(email,clean_body):
     from_addr=email.get("from",{}).get("emailAddress",{}).get("address","")
     from_name=email.get("from",{}).get("emailAddress",{}).get("name","")
-    skip=["noreply","no-reply","bigagency.sk"]
-    if from_addr and not any(x in from_addr.lower() for x in skip):
+    if from_addr and "noreply" not in from_addr.lower():
         return from_addr,from_name
-    emails_in_body=re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}',clean_body)
+    emails_in_body=re.findall(r'[i-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}',clean_body)
     for e in emails_in_body:
         if not any(x in e.lower() for x in ['noreply','no-reply','bigagency','microsoft','outlook']):
             return e,""
@@ -93,13 +112,13 @@ def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{e
 
 def pp_get(ep,params=None):
     try:
-        r=requests.get(f"{PROFIPONUKA_BASE}/{ep}",headers={"Authorization":PROFIPONUKA_API_KEY},params=params)
+        r=requests.get(f"{PROFIPONUKA_BASE}/{ep}",headers={"Authorization":PROPFIPONUKA_API_KEY},params=params)
         return r.json()
     except Exception as e: logger.error(f"pp_get {ep}: {e}"); return {}
 
 def pp_post(ep,data):
     try:
-        r=requests.post(f"{PROFIPONUKA_BASE}/{ep}",headers={"Authorization":PROFIPONUKA_API_KEY},data=data)
+        r=requests.post(f"{PROPFIPONUKA_BASE}/{ep}",headers={"Authorization":PROFIPONUKA_API_KEY},data=data)
         return r.json()
     except Exception as e: logger.error(f"pp_post {ep}: {e}"); return {}
 
@@ -143,11 +162,10 @@ def start_time_tracking(task_id):
         logger.warning(f"Time tracking failed: {r.status_code}"); return False
     except Exception as e: logger.error(f"start_time_tracking: {e}"); return False
 
-def send_email_via_graph(to_email,subject,body_text,body_html=None):
+def send_email_via_graph(to_email,subject,body_text):
     try:
         token=get_ms_token()
-        body_content={"contentType":"HTML","content":body_html} if body_html else {"contentType":"Text","content":body_text}
-        msg={"message":{"subject":subject,"body":body_content,"toRecipients":[{"emailAddress":{"address":to_email}}]}}
+        msg={"message":{"subject":subject,"body":{"contentType":"Text","content":body_text},"toRecipients":[{"emailAddress":{"address":to_email}}]}}
         r=requests.post(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/sendMail",
             headers={"Authorization":f"Bearer {token}","Content-Type":"application/json"},json=msg)
         if r.status_code==202: logger.info(f"Email odoslany: {to_email}"); return True
@@ -155,22 +173,26 @@ def send_email_via_graph(to_email,subject,body_text,body_html=None):
     except Exception as e: logger.error(f"send_email_via_graph: {e}"); return False
 
 def task_already_exists(msg_id,sender_email):
+    # 1. Skontroluj lokalny subor s ID uz spracovanych emailov (rychle, bez API)
+    if msg_id:
+        processed=load_processed_ids()
+        if msg_id in processed:
+            logger.warning(f"Duplikat (local cache MSG_ID) - preskakujem: {msg_id[:40]}")
+            return True
+    # 2. Skontroluj ClickUp (description moze byt prazdna v list API, ale skusime)
     try:
-        cutoff=int((datetime.now()-timedelta(hours=24)).timestamp()*1000)
         page=0
         while True:
             tasks=clickup_get(f"list/{CLICKUP_LIST_ID}/task?page={page}&include_closed=true").get("tasks",[])
             if not tasks: break
             for t in tasks:
                 desc=(t.get("description") or "")
-                if msg_id and (f"[MSG_ID: {msg_id}]" in desc or f"[MSG\_ID: {msg_id}]" in desc or msg_id in desc):
-                    logger.warning(f"Duplikat (MSG_ID) - preskakujem")
+                if msg_id and msg_id in desc:
+                    logger.warning(f"Duplikat (ClickUp MSG_ID v description) - preskakujem")
                     return True
                 if sender_email and sender_email.lower() in desc.lower():
-                    created=int(t.get("date_created") or 0)
-                    if created>cutoff:
-                        logger.warning(f"Duplikat (rovnaky odosielatel za 24h) - preskakujem")
-                        return True
+                    logger.warning(f"Duplikat (ClickUp sender email) - preskakujem")
+                    return True
             if len(tasks)<100: break
             page+=1
     except Exception as e:
@@ -178,9 +200,9 @@ def task_already_exists(msg_id,sender_email):
     return False
 
 def get_team_workload():
-    m=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={MICHAL_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    ma=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={MARTIN_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
-    s=len(clickup_get(f"list/{CLICKUP_LIST_ID}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    m=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={MICHAL_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    ma=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={MARTIN_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
+    s=len(clickup_get(f"team/{CLICKUP_TEAM_ID}/task?assignees[]={STANISLAV_ID}&statuses[]=to do&statuses[]=in progress").get("tasks",[]))
     logger.info(f"Vytazenost: Michal={m}, Martin={ma}, Stanislav={s}")
     return {"michal":{"id":MICHAL_ID,"count":m},"martin":{"id":MARTIN_ID,"count":ma},"stanislav":{"id":STANISLAV_ID,"count":s}}
 
@@ -216,22 +238,18 @@ BigAgency je eventova agentura - organizuje eventy PRE klientov a pozicuje vybav
 
 REALNY DOPYT (is_real_request=true) = klient chce aby BigAgency nieco spravila PRE NEHO:
 - chce zorganizovat event, firemnu akciu, teambuilding, sportovy turnaj, konferenciu
-- chce prenajat vybavenie alebo nabytok (skaciacie hrady, ninja draha, tanecna podlaha, stoly, stolicky, stand-by stoly, barove stolicce, kolotoc, detske atrakcie, casomiera, timing pre beh/event...)
-- klient pyta casomieru / timing pre sportovy event alebo beh - VZDY realny dopyt
+- chce prenajat vybavenie (skaciacie hrady, ninja draha, tanecna podlaha, stoly, stolicky...)
 - pyta sa na cenu/ponuku za sluzby BigAgency
 - firma/korporat hlada dodavatela na organizaciu eventu - aj ked pisu TENDER znamena ze hladaju dodavatela
-- VZDY realny dopyt: "Ziadost o cenovu ponuku" alebo "Cenova ponuka" v subjekte = niekto chce od BigAgency ponuku (nie ze oni posilaju ponuku BigAgency)
-- VZDY realny dopyt: verejny obstaravatel / verejne obstaravanie - idu nakupovat sluzby OD BigAgency (nie predavat)
-- VZDY realny dopyt: email obsahuje "vyzyvame Vas na predlozenie cenovej ponuky" alebo podobne
-- VZDY realny dopyt: email z weboveho formulara kde subject zacina "WEB kontakt" - AUTOMATICKY je to realny dopyt, ignoruj JEDINE ak je cely obsah v cudzom jazyku (rustina, arabcina) alebo je to ocividny spam
+- email z weboveho formulara (subject zacina "WEB kontakt") - vzdy realny dopyt pokial telo emailu nie je spam
 - klient chce aby mu BigAgency zavolala (Zavolame Vam)
 
 IGNORUJ (is_real_request=false):
-- hotely/priestory/venues ponukaju svoju lokalu, priestory alebo sluzby BigAgency (oni predavaju, nie kupuju) - IGNORUJ aj ked pisu "spolupracu" alebo "partnerstvo"
+- hotely/priestory/venues ponukaju svoju lokalu, priestory alebo sluzby BigAgency - oni predavaju BigAgency, nie kupuju - IGNORUJ aj ked pisu "spolupracu" alebo "partnerstvo" alebo "mutual benefit"
 - konferencie/veltrhy pozyvaju BigAgency ako navstevnika/kupujuceho
 - vendori/dodavatelia ponukaju svoje produkty/sluzby BigAgency
 - brigady, uchadzaci o pracu
-- spam (rustina, turectina, arabcina, loterie, darknet)
+- spam (rustina, turectina, arabcina, loterie, kasino, darknet)
 - faktury, bankove vypisy, automaticke notifikacie systemov
 - newslettery ktore nikto nepytal
 - app notifikacie ako "is in your phone contacts" alebo podobne
@@ -276,12 +294,10 @@ Dopyt prijaty: {today}
 
 def process_info_emails():
     logger.info("Spracuvam INFO Requesty emaily...")
-    processed=0; skipped=0; errors=0; emails=[]
     try:
         emails=get_unread_emails_from_folder("INFO Requesty",limit=15)
-        if not emails: logger.info("Ziadne nove emaily.")
-        workload=get_team_workload()
-        seen_in_run=set()
+        if not emails: logger.info("Ziadne nove neprecitane emaily."); return
+        workload=get_team_workload(); processed=0; skipped=0; errors=0
         for email in emails:
             eid=email.get("id",""); subject=email.get("subject","")
             html_body=email.get("body",{}).get("content","")
@@ -289,14 +305,10 @@ def process_info_emails():
             sender_email,sender_name=get_client_contact(email,clean_body)
             try: analysis=analyze_email_with_claude(subject,clean_body[:3000],sender_email,sender_name)
             except Exception as e: logger.error(f"Analyza: {e}"); mark_email_as_read(eid); errors+=1; continue
-            logger.info(f"Claude: is_real={analysis.get('is_real_request')} | {subject[:40]}")
-            if not analysis.get("is_real_request"):
+            if not analysis or not analysis.get("is_real_request"):
                 logger.info(f"Ignorovany: {subject[:50]}"); mark_email_as_read(eid); continue
             task_name=analysis.get("task_name",subject[:100])
             msg_id=email.get("internetMessageId","") or eid
-            dedup_key=msg_id or sender_email
-            if dedup_key in seen_in_run:
-                skipped+=1; mark_email_as_read(eid); continue
             if task_already_exists(msg_id,sender_email):
                 skipped+=1; mark_email_as_read(eid); continue
             aid,aname=get_less_busy_assignee(workload)
@@ -314,7 +326,9 @@ def process_info_emails():
             desc=generate_task_description(analysis,clean_body[:3000],sender_email,sender_name,msg_id,quote_url)
             tid=create_task(task_name,desc,aid,"high")
             if tid:
-                processed+=1; seen_in_run.add(dedup_key); logger.info(f"OK: {sender_email} -> {aname}" + (f" | PP: {quote_url}" if quote_url else ""))
+                processed+=1
+                save_processed_id(msg_id)  # uloz do lokalneho cache aby sa nepridaval duplicitne
+                logger.info(f"OK: {sender_email} -> {aname}" + (f" | PP: {quote_url}" if quote_url else ""))
                 # Email kolegovi
                 assignee_email=ASSIGNEE_EMAILS.get(str(aid))
                 if assignee_email:
@@ -326,13 +340,13 @@ def process_info_emails():
                 mark_email_as_read(eid)
             else:
                 logger.error(f"CHYBA: task pre {sender_email} sa nepodarilo vytvorit - email zostava unread"); errors+=1
-    except Exception as e: logger.error(f"Chyba: {e}"); errors+=1
-    logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
-    cas=datetime.now().strftime("%H:%M")
-    icon="✅" if errors==0 else "⚠️"
-    subj=f"{icon} Agent {cas} — nov\xe9 tasky: {processed}, preskočen\xfdch: {skipped}"
-    body_sum=f"Beh {cas}:\n\nNov\xe9 ClickUp tasky: {processed}\nPreskočen\xe9 (duplik\xe1ty): {skipped}\nChyby pri anal\xfdze: {errors}\nCelkovo emailov: {len(emails)}"
-    send_email_via_graph(MS_USER_EMAIL,subj,body_sum)
+        logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
+        cas=datetime.now().strftime("%H:%M")
+        icon="✅" if errors==0 else "⚠️"
+        subj=f"{icon} Agent {cas} — nové tasky: {processed}, preskočených: {skipped}"
+        body_sum=f"Beh {cas}:\n\nNové ClickUp tasky: {processed}\nPreskočené (duplikáty): {skipped}\nChyby pri analýze: {errors}\nCelkovo emailov: {len(emails)}"
+        send_email_via_graph(MS_USER_EMAIL,subj,body_sum)
+    except Exception as e: logger.error(f"Chyba: {e}")
 
 def check_unprocessed_tasks():
     """24h a 72h reminder pre tasky v to do statuse."""
@@ -353,18 +367,18 @@ def check_unprocessed_tasks():
                 for a in assignees:
                     em=ASSIGNEE_EMAILS.get(str(a.get("id","")))
                     if em:
-                        aname=(a.get("username","").split() or [""])[0]
-                        html=f"""<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px"><h2 style="color:#e53e3e">⚠️ URGENTNÉ — Dopyt čaká {int(hours_old)} hodín!</h2><p>Ahoj {aname},</p><p>Dopyt <strong>'{tname}'</strong> čaká už <strong>{int(hours_old)} hodín</strong> bez spracovania. Klient stále čaká na odpoveď.</p><p style="margin:30px 0"><a href="{task_url}" style="background:#e53e3e;color:white;padding:14px 28px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold">🔴 Otvoriť task v ClickUp</a></p><p style="color:#555;font-size:13px">Klient čaká 3+ dni. Prosím vybav urgentne a odpovedz mu čo najskôr.</p><p style="color:#999;font-size:12px">BigAgency AI Agent</p></body></html>"""
-                        send_email_via_graph(em,f"URGENTNÉ – Nespracovaný dopyt: {tname}",None,html)
+                        aname=a.get("username","").split()[0]
+                        body="\n".join([f"Ahoj {aname},","",f"Dopyt '{tname}' caka uz {int(hours_old)} hodin bez spracovania!","","Klient stale caka na odpoved. Prosim riesit urgentne.","","Ak si uz zacel/a, zmen prosim status v ClickUp na 'In Progress'.",f"Link: {task_url}","","BigAgency AI Agent"])
+                        send_email_via_graph(em,f"URGENTNE - Nespracovany dopyt: {tname}",body)
                 r72+=1
             elif hours_old>=24 and not has24:
                 add_comment_to_task(tid,f"Dopyt caka na spracovanie uz {int(hours_old)} hodin a stale je v stave to do. [24h REMINDER]")
                 for a in assignees:
                     em=ASSIGNEE_EMAILS.get(str(a.get("id","")))
                     if em:
-                        aname=(a.get("username","").split() or [""])[0]
-                        html=f"""<html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px"><h2 style="color:#d69e2e">⏰ Dopyt čaká na spracovanie ({int(hours_old)} hodín)</h2><p>Ahoj {aname},</p><p>Dopyt <strong>'{tname}'</strong> čaká v ClickUp už {int(hours_old)} hodín na spracovanie.</p><p style="margin:30px 0"><a href="{task_url}" style="background:#3182ce;color:white;padding:14px 28px;text-decoration:none;border-radius:6px;font-size:16px;font-weight:bold">📋 Otvoriť task v ClickUp</a></p><p style="color:#555;font-size:13px">Prosím odpovedz klientovi čo najskôr.</p><p style="color:#999;font-size:12px">BigAgency AI Agent</p></body></html>"""
-                        send_email_via_graph(em,f"Nespracovaný dopyt v ClickUp: {tname}",None,html)
+                        aname=a.get("username","").split()[0]
+                        body="\n".join([f"Ahoj {aname},","",f"Dopyt '{tname}' v ClickUp caka uz {int(hours_old)} hodin na spracovanie.","","Prosim skontroluj a odpovedz klientovi co najskor.",f"Link: {task_url}","","BigAgency AI Agent"])
+                        send_email_via_graph(em,f"Nespracovany dopyt v ClickUp: {tname}",body)
                 r24+=1
         logger.info(f"Remindery: 24h={r24}, 72h={r72}")
     except Exception as e: logger.error(f"check_unprocessed_tasks: {e}")
@@ -379,7 +393,9 @@ def check_deadlines():
             u="URGENTNE" if dl<=1 else ("BLIZI SA" if dl<=3 else "Pripomienka")
             marker=f"Deadline: {dd.strftime('%d.%m.%Y')}"
             ctexts=[(c.get("comment_text") or "") for c in clickup_get(f"task/{t['id']}/comment").get("comments",[])]
-            if any(marker in ct for ct in ctexts): continue
+            if any(marker in ct for ct in ctexts):
+                logger.info(f"Deadline komentar uz existuje pre task {t['id']}, preskakujem")
+                continue
             add_comment_to_task(t["id"],f"{u}\nDeadline: {dd.strftime('%d.%m.%Y')} ({dl} dni)")
     except Exception as e: logger.error(f"Deadline: {e}")
 
@@ -399,11 +415,9 @@ def setup_schedule():
     schedule.every().day.at("08:30").do(check_deadlines)
     schedule.every().day.at("09:00").do(process_info_emails)
     schedule.every().day.at("10:00").do(check_unprocessed_tasks)
-    schedule.every().day.at("12:00").do(process_info_emails)
-    schedule.every().day.at("13:00").do(process_info_emails)
     schedule.every().day.at("16:00").do(process_info_emails)
     schedule.every().monday.at("08:00").do(weekly_report)
-    logger.info("Scheduler: 08:30 deadliny | 09:00+12:00+16:00 emaily | 10:00 remindery | pon 08:00 report")
+    logger.info("Scheduler: 08:30 deadliny | 09:00+16:00 emaily | 10:00 remindery | pon 08:00 report")
 
 def main():
     logger.info("BigAgency AI Agent spusteny!")
@@ -412,10 +426,6 @@ def main():
     if not PROFIPONUKA_API_KEY: logger.warning("PROFIPONUKA_API_KEY nie je nastaveny - PP integrácia vypnuta")
     setup_schedule()
     logger.info("Cakam na ulohy...")
-    while True:
-        try: schedule.run_pending()
-        except Exception as e: logger.error(f"Scheduler chyba: {e}")
-        time.sleep(60)
-
+    while True: schedule.run_pending(); time.sleep(60)
 
 if __name__=="__main__": main()
