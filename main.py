@@ -70,11 +70,12 @@ def get_unread_emails_from_folder(folder_name="INFO Requesty",limit=15):
     fid=next((f["id"] for f in folders.get("value",[]) if f["displayName"].lower()==folder_name.lower()),None)
     if not fid: logger.error(f"Priecinok '{folder_name}' nenajdeny!"); return []
     since=(datetime.now()-timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Berieme VSETKY emaily za 48h (aj precitane) - dedup resi processed_msg_ids.json cache
     url=(f"https://graph.microsoft.com/v1.0/users/{MS_USER_EMAIL}/mailFolders/{fid}/messages"
-         f"?$filter=isRead eq false and receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
+         f"?$filter=receivedDateTime ge {since}&$top={limit}&$orderby=receivedDateTime desc"
          f"&$select=id,subject,bodyPreview,body,from,sender,replyTo,receivedDateTime,internetMessageId,isRead")
     emails=requests.get(url,headers=h).json().get("value",[])
-    logger.info(f"Najdenych {len(emails)} neprecitanych emailov za poslednych 48 hodin")
+    logger.info(f"Najdenych {len(emails)} emailov za poslednych 48 hodin")
     return emails
 
 def mark_email_as_read(eid,retries=3):
@@ -97,7 +98,7 @@ def get_client_contact(email,clean_body):
     from_name=email.get("from",{}).get("emailAddress",{}).get("name","")
     if from_addr and "noreply" not in from_addr.lower():
         return from_addr,from_name
-    emails_in_body=re.findall(r'[i-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}',clean_body)
+    emails_in_body=re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}',clean_body)
     for e in emails_in_body:
         if not any(x in e.lower() for x in ['noreply','no-reply','bigagency','microsoft','outlook']):
             return e,""
@@ -112,13 +113,13 @@ def clickup_post(ep,d): return requests.post(f"https://api.clickup.com/api/v2/{e
 
 def pp_get(ep,params=None):
     try:
-        r=requests.get(f"{PROFIPONUKA_BASE}/{ep}",headers={"Authorization":PROPFIPONUKA_API_KEY},params=params)
+        r=requests.get(f"{PROFIPONUKA_BASE}/{ep}",headers={"Authorization":PROFIPONUKA_API_KEY},params=params)
         return r.json()
     except Exception as e: logger.error(f"pp_get {ep}: {e}"); return {}
 
 def pp_post(ep,data):
     try:
-        r=requests.post(f"{PROPFIPONUKA_BASE}/{ep}",headers={"Authorization":PROFIPONUKA_API_KEY},data=data)
+        r=requests.post(f"{PROFIPONUKA_BASE}/{ep}",headers={"Authorization":PROFIPONUKA_API_KEY},data=data)
         return r.json()
     except Exception as e: logger.error(f"pp_post {ep}: {e}"); return {}
 
@@ -296,8 +297,8 @@ def process_info_emails():
     logger.info("Spracuvam INFO Requesty emaily...")
     try:
         emails=get_unread_emails_from_folder("INFO Requesty",limit=15)
-        if not emails: logger.info("Ziadne nove neprecitane emaily."); return
-        workload=get_team_workload(); processed=0; skipped=0; errors=0
+        workload=get_team_workload() if emails else {}; processed=0; skipped=0; errors=0
+        if not emails: logger.info("Ziadne emaily za poslednych 48 hodin.")
         for email in emails:
             eid=email.get("id",""); subject=email.get("subject","")
             html_body=email.get("body",{}).get("content","")
