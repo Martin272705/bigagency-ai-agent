@@ -180,7 +180,7 @@ def task_already_exists(msg_id,sender_email):
         if msg_id in processed:
             logger.warning(f"Duplikat (local cache MSG_ID) - preskakujem: {msg_id[:40]}")
             return True
-    # 2. Skontroluj ClickUp (description moze byt prazdna v list API, ale skusime)
+    # 2. Skontroluj ClickUP (description moze byt prazdna v list API, ale skusime)
     try:
         page=0
         while True:
@@ -255,7 +255,7 @@ IGNORUJ (is_real_request=false):
 - newslettery ktore nikto nepytal
 - app notifikacie ako "is in your phone contacts" alebo podobne
 
-create_quote=true ak ide o konkretny dopyt na prenajom vybavenia alebo event kde mozno hned pripravit ponuku. false ak ide o TENDER alebo klient len pyta vseobecne info.
+create_quote=true ak ide o konkretny dopyt na prenajom vybavenia alebo event kde mozno hjed pripravit ponuku. false ak ide o TENDER alebo klient len pyta vseobecne info.
 
 JSON bez backticks: {{"is_real_request":true/false,"create_quote":true/false,"client_name":"meno alebo nazov firmy","event_description":"popis co chcu","event_date":"datum alebo null","task_name":"nazov tasku"}}"""
     r=anthropic.messages.create(model="claude-haiku-5-5",max_tokens=1024,messages=[{"role":"user","content":p}])
@@ -344,7 +344,7 @@ def process_info_emails():
         logger.info(f"Spracovanych {processed}, preskoceno duplikatov: {skipped}")
         cas=datetime.now().strftime("%H:%M")
         icon="✅" if errors==0 else "⚠️"
-        subj=f"{icon} Agent {cas} — nové tasky: {processed}, preskočených: {skipped}"
+        subj=f"{icon} Agent {cas} — nové tasky: {processed}, preskočenùch: {skipped}"
         body_sum=f"Beh {cas}:\n\nNové ClickUp tasky: {processed}\nPreskočené (duplikáty): {skipped}\nChyby pri analýze: {errors}\nCelkovo emailov: {len(emails)}"
         send_email_via_graph(MS_USER_EMAIL,subj,body_sum)
     except Exception as e: logger.error(f"Chyba: {e}")
@@ -370,7 +370,7 @@ def check_unprocessed_tasks():
                     if em:
                         aname=a.get("username","").split()[0]
                         body="\n".join([f"Ahoj {aname},","",f"Dopyt '{tname}' caka uz {int(hours_old)} hodin bez spracovania!","","Klient stale caka na odpoved. Prosim riesit urgentne.","","Ak si uz zacel/a, zmen prosim status v ClickUp na 'In Progress'.",f"Link: {task_url}","","BigAgency AI Agent"])
-                        send_email_via_graph(em,f"URGENTNE - Nespracovany dopyt: {tname}",body)
+                        send_email_via_graph(em,f"URGENTNE - Nespracovany joppyt: {tname}",bdy)
                 r72+=1
             elif hours_old>=24 and not has24:
                 add_comment_to_task(tid,f"Dopyt caka na spracovanie uz {int(hours_old)} hodin a stale je v stave to do. [24h REMINDER]")
@@ -416,9 +416,11 @@ def setup_schedule():
     schedule.every().day.at("08:30").do(check_deadlines)
     schedule.every().day.at("09:00").do(process_info_emails)
     schedule.every().day.at("10:00").do(check_unprocessed_tasks)
-    schedule.every().day.at("16:00").do(process_info_emails)
+    schedule.every().day.at("12:00").do(process_info_emails)
+    schedule.every().day.at("15:00").do(process_info_emails)
+    schedule.every().day.at("18:00").do(process_info_emails)
     schedule.every().monday.at("08:00").do(weekly_report)
-    logger.info("Scheduler: 08:30 deadliny | 09:00+16:00 emaily | 10:00 remindery | pon 08:00 report")
+    logger.info("Scheduler: 08:30 deadliny | 09:00+12:00+15:00+18:00 emaily | 10:00 remindery | pon 08:00 report")
 
 def main():
     logger.info("BigAgency AI Agent spusteny!")
